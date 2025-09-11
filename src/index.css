@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Football Analytics Design System - Neon Futuristic Theme */
+
+@layer base {
+  :root {
+    /* Core neon colors */
+    --neon-cyan: 180 100% 50%;
+    --electric-blue: 207 100% 50%;
+    --deep-purple: 267 91% 56%;
+    --vibrant-orange: 14 100% 59%;
+    --hot-pink: 328 100% 54%;
+    --lime-green: 120 61% 50%;
+    
+    /* Background colors */
+    --midnight: 231 16% 9%;
+    --dark-slate: 231 24% 15%;
+    
+    /* Glass effects */
+    --glass-white: 0 0% 100% / 0.05;
+    --glass-border: 0 0% 100% / 0.18;
+    
+    /* Text colors */
+    --text-glow: 0 0% 100%;
+    --text-muted: 0 0% 100% / 0.7;
+    
+    /* Status colors */
+    --success-green: 150 100% 50%;
+    --warning-orange: 43 100% 50%;
+    --error-red: 348 100% 57%;
+
+    /* Design system colors */
+    --background: var(--midnight);
+    --foreground: var(--text-glow);
+
+    --card: var(--glass-white);
+    --card-foreground: var(--text-glow);
+
+    --popover: var(--glass-white);
+    --popover-foreground: var(--text-glow);
+
+    --primary: var(--neon-cyan);
+    --primary-foreground: var(--midnight);
+
+    --secondary: var(--glass-white);
+    --secondary-foreground: var(--text-glow);
+
+    --muted: var(--glass-white);
+    --muted-foreground: var(--text-muted);
+
+    --accent: var(--electric-blue);
+    --accent-foreground: var(--text-glow);
+
+    --destructive: var(--error-red);
+    --destructive-foreground: var(--text-glow);
+
+    --border: var(--glass-border);
+    --input: var(--glass-border);
+    --ring: var(--neon-cyan);
+
+    --radius: 1.5rem;
+
+    /* Gradients */
+    --gradient-mesh: radial-gradient(circle at 15% 25%, hsl(var(--electric-blue)) 0%, transparent 50%),
+                     radial-gradient(circle at 85% 75%, hsl(var(--deep-purple)) 0%, transparent 50%),
+                     radial-gradient(circle at 35% 60%, hsl(var(--hot-pink)) 0%, transparent 50%),
+                     radial-gradient(circle at 75% 20%, hsl(var(--vibrant-orange)) 0%, transparent 50%),
+                     radial-gradient(circle at 25% 85%, hsl(var(--lime-green)) 0%, transparent 50%);
+    
+    --gradient-primary: linear-gradient(45deg, hsl(var(--neon-cyan)), hsl(var(--electric-blue)));
+    --gradient-secondary: linear-gradient(45deg, hsl(var(--electric-blue)), hsl(var(--hot-pink)));
+    --gradient-accent: linear-gradient(135deg, hsl(var(--vibrant-orange)), hsl(var(--hot-pink)));
+
+    /* Shadows */
+    --shadow-neon: 0 0 30px;
+    --shadow-glass: 0 20px 40px hsl(0 0% 0% / 0.3);
+    
+    /* Animations */
+    --transition-smooth: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
