@@ -1,0 +1,4 @@
+date,home_team,away_team,home_team_id,away_team_id,home_points_last_5,home_goals_scored_last_5,home_goals_conceded_last_5,away_points_last_5,away_goals_scored_last_5,away_goals_conceded_last_5,home_h2h_wins,away_h2h_wins,h2h_draws,h2h_total_matches,home_league_position,away_league_position
+,Liverpool,4:2,31,,0,0,0,0,0,0,0,0,0,0,1,
+,Aston Villa,0:0,405,,0,0,0,0,0,0,0,0,0,0,18,
+,Brighton,1:1,1237,,0,0,0,0,0,0,0,0,0,0,14,
