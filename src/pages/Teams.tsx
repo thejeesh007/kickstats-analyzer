@@ -184,7 +184,7 @@ const Teams = () => {
 
         {filteredTeams.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-muted-foreground text-lg">No teams found matching your criteria.</p>
+            <p className="text-muted-foreground text-lg">No teams found.</p>
           </div>
         )}
       </div>
