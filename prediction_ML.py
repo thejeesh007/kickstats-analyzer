@@ -1,401 +1,481 @@
 """
-Football Match Prediction Pipeline
-Predicts match results (classification) and goals (regression) using historical data.
+Football Match Prediction Pipeline - Customized for Your Dataset
+Predicts match winner and goals scored using your actual match data.
 """
 
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.metrics import (
     accuracy_score, f1_score, confusion_matrix, 
-    mean_absolute_error, mean_squared_error
+    mean_absolute_error, mean_squared_error, r2_score,
+    classification_report
 )
-import xgboost as xgb
 import warnings
 warnings.filterwarnings('ignore')
 
-# ----------------------------
-# DATA PREPROCESSING FUNCTIONS
-# ----------------------------
+# Try to import XGBoost, use RandomForest as fallback
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("XGBoost not available. Using RandomForest.")
 
-def load_and_preprocess_data(filepath):
-    """
-    Load dataset from Excel file and perform initial preprocessing.
-    
-    Args:
-        filepath (str): Path to the Excel file (.xlsx or .xls)
+class FootballPredictor:
+    def __init__(self):
+        self.classification_model = None
+        self.home_goals_model = None
+        self.away_goals_model = None
+        self.scaler = None
+        self.team_encoder = None
+        self.result_encoder = None
+        self.feature_columns = []
         
-    Returns:
-        pd.DataFrame: Preprocessed dataframe
-    """
-    df = pd.read_excel(enhanced_football_matches.xlsx)
-    
-    # Convert date to datetime if it's not already
-    if 'date' in df.columns:
-        df['date'] = pd.to_datetime(df['date'])
+    def load_and_preprocess_data(self, filepath):
+        """Load and preprocess the dataset"""
+        print(f"Loading data from: {filepath}")
         
-    # Create result column if it doesn't exist
-    if 'result' not in df.columns:
-        df['result'] = df.apply(
-            lambda row: 'H' if row['home_goals'] > row['away_goals'] 
-                       else 'A' if row['away_goals'] > row['home_goals'] 
-                       else 'D', axis=1
-        )
-    
-    return df
-
-def handle_missing_values(df):
-    """
-    Handle missing values in the dataset.
-    
-    Args:
-        df (pd.DataFrame): Input dataframe
+        try:
+            df = pd.read_excel(filepath)
+            print(f"Successfully loaded {len(df)} rows and {len(df.columns)} columns")
+            print(f"Columns: {list(df.columns)}")
+            
+        except FileNotFoundError:
+            print(f"Error: File '{filepath}' not found!")
+            raise
+        except Exception as e:
+            print(f"Error loading file: {e}")
+            raise
         
-    Returns:
-        pd.DataFrame: Dataframe with missing values handled
-    """
-    # Make a copy to avoid modifying the original
-    df_processed = df.copy()
+        return df
     
-    # Identify numerical and categorical columns
-    numerical_cols = df_processed.select_dtypes(include=[np.number]).columns.tolist()
-    categorical_cols = df_processed.select_dtypes(exclude=[np.number]).columns.tolist()
+    def extract_goals_and_results(self, df):
+        """Extract goals and match results from your dataset"""
+        df_processed = df.copy()
+        
+        print("Extracting goals and results from your dataset...")
+        
+        # Your dataset has 'final_scor' column - let's extract from there
+        if 'final_scor' in df.columns:
+            print("Found 'final_scor' column, extracting goals...")
+            
+            def parse_score(score_str):
+                if pd.isna(score_str) or str(score_str).strip() == '':
+                    return pd.Series([np.nan, np.nan])
+                
+                try:
+                    score_str = str(score_str).strip()
+                    if '-' in score_str:
+                        parts = score_str.split('-')
+                        if len(parts) == 2:
+                            home_goals = int(float(parts[0].strip()))
+                            away_goals = int(float(parts[1].strip()))
+                            return pd.Series([home_goals, away_goals])
+                except:
+                    pass
+                
+                return pd.Series([np.nan, np.nan])
+            
+            # Extract goals
+            df_processed[['home_goals', 'away_goals']] = df_processed['final_scor'].apply(parse_score)
+            
+            # Count extracted matches
+            completed_matches = df_processed[['home_goals', 'away_goals']].dropna().shape[0]
+            print(f"Extracted goals from {completed_matches} completed matches")
+            
+            # Create match result
+            def determine_result(row):
+                if pd.isna(row['home_goals']) or pd.isna(row['away_goals']):
+                    return None
+                elif row['home_goals'] > row['away_goals']:
+                    return 'H'  # Home win
+                elif row['away_goals'] > row['home_goals']:
+                    return 'A'  # Away win
+                else:
+                    return 'D'  # Draw
+            
+            df_processed['result'] = df_processed.apply(determine_result, axis=1)
+            
+            if df_processed['result'].notna().sum() > 0:
+                result_counts = df_processed['result'].value_counts()
+                print(f"Match results: {dict(result_counts)}")
+        
+        # Filter only completed matches for training
+        completed_mask = df_processed['match_status'] == 'completed'
+        completed_df = df_processed[completed_mask].copy()
+        print(f"Found {len(completed_df)} completed matches for training")
+        
+        return completed_df
     
-    # Remove target variables from numerical columns if present
-    targets = ['home_goals', 'away_goals', 'result']
-    numerical_cols = [col for col in numerical_cols if col not in targets]
+    def prepare_features(self, df):
+        """Prepare feature matrix using your dataset columns"""
+        df_processed = df.copy()
+        
+        # Your actual column names from the dataset
+        self.feature_columns = [
+            'home_points_last5',
+            'away_points_last5', 
+            'home_goals_scored_last5',
+            'away_goals_scored_last5',
+            'home_goals_conceded_last5',
+            'away_goals_conceded_last5',
+            'home_league_position',
+            'away_league_position',
+            'goal_difference_home',
+            'goal_difference_away',
+            'home_team_encoded',
+            'away_team_encoded'
+        ]
+        
+        # Fill missing numerical values with median
+        numerical_cols = [
+            'home_points_last5', 'away_points_last5',
+            'home_goals_scored_last5', 'away_goals_scored_last5', 
+            'home_goals_conceded_last5', 'away_goals_conceded_last5',
+            'home_league_position', 'away_league_position',
+            'goal_difference_home', 'goal_difference_away'
+        ]
+        
+        for col in numerical_cols:
+            if col in df_processed.columns:
+                df_processed[col] = pd.to_numeric(df_processed[col], errors='coerce')
+                median_val = df_processed[col].median()
+                df_processed[col] = df_processed[col].fillna(median_val)
+        
+        # Encode teams
+        if 'home_team' in df_processed.columns and 'away_team' in df_processed.columns:
+            # Get all unique teams
+            all_teams = pd.concat([df_processed['home_team'], df_processed['away_team']]).unique()
+            all_teams = [str(team) for team in all_teams if str(team) != 'nan']
+            
+            if self.team_encoder is None:
+                self.team_encoder = LabelEncoder()
+                self.team_encoder.fit(all_teams)
+            
+            # Encode team names
+            df_processed['home_team_encoded'] = self.team_encoder.transform(df_processed['home_team'].astype(str))
+            df_processed['away_team_encoded'] = self.team_encoder.transform(df_processed['away_team'].astype(str))
+        
+        # Select available features
+        available_features = [col for col in self.feature_columns if col in df_processed.columns]
+        print(f"Using {len(available_features)} features: {available_features}")
+        
+        return df_processed[available_features]
     
-    # Handle missing values in numerical columns with median
-    for col in numerical_cols:
-        if df_processed[col].isnull().any():
-            df_processed[col].fillna(df_processed[col].median(), inplace=True)
-    
-    # Handle missing values in categorical columns with mode
-    for col in categorical_cols:
-        if col in df_processed.columns and df_processed[col].isnull().any():
-            mode_value = df_processed[col].mode()
-            if len(mode_value) > 0:
-                df_processed[col].fillna(mode_value[0], inplace=True)
+    def train_models(self, filepath_or_df, model_type='random_forest'):
+        """Train prediction models using your data"""
+        print("\n=== Training Football Match Prediction Models ===")
+        
+        # Load data if filepath is provided
+        if isinstance(filepath_or_df, str):
+            df = self.load_and_preprocess_data(filepath_or_df)
+        else:
+            df = filepath_or_df
+        
+        # Extract goals and results from completed matches
+        df_processed = self.extract_goals_and_results(df)
+        
+        if len(df_processed) == 0:
+            print("No completed matches found for training!")
+            return
+        
+        # Prepare features
+        print("\nPreparing features...")
+        X = self.prepare_features(df_processed)
+        
+        # Prepare targets
+        y_result = df_processed['result'] if 'result' in df_processed.columns else None
+        y_home_goals = df_processed['home_goals'] if 'home_goals' in df_processed.columns else None
+        y_away_goals = df_processed['away_goals'] if 'away_goals' in df_processed.columns else None
+        
+        print(f"Training data shape: {X.shape}")
+        print(f"Valid results: {y_result.notna().sum() if y_result is not None else 0}")
+        print(f"Valid goals: {y_home_goals.notna().sum() if y_home_goals is not None else 0}")
+        
+        # Train classification model (match winner prediction)
+        if y_result is not None and y_result.notna().sum() > 5:
+            print(f"\n--- Training Match Winner Prediction Model ---")
+            
+            # Remove rows with missing targets
+            mask = y_result.notna() & X.notna().all(axis=1)
+            X_class = X[mask]
+            y_class = y_result[mask]
+            
+            print(f"Training samples: {len(X_class)}")
+            print(f"Result distribution: {y_class.value_counts().to_dict()}")
+            
+            if len(y_class.unique()) > 1:  # Need at least 2 classes
+                # Encode results
+                self.result_encoder = LabelEncoder()
+                y_class_encoded = self.result_encoder.fit_transform(y_class)
+                
+                # Split data
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X_class, y_class_encoded, test_size=0.2, random_state=42, 
+                    stratify=y_class_encoded
+                )
+                
+                # Scale features
+                self.scaler = StandardScaler()
+                X_train_scaled = self.scaler.fit_transform(X_train)
+                X_test_scaled = self.scaler.transform(X_test)
+                
+                # Choose model
+                if model_type == 'xgboost' and XGBOOST_AVAILABLE:
+                    self.classification_model = xgb.XGBClassifier(
+                        n_estimators=100, random_state=42, eval_metric='logloss'
+                    )
+                else:
+                    self.classification_model = RandomForestClassifier(
+                        n_estimators=100, random_state=42, class_weight='balanced'
+                    )
+                
+                # Train model
+                self.classification_model.fit(X_train_scaled, y_train)
+                
+                # Evaluate
+                y_pred = self.classification_model.predict(X_test_scaled)
+                accuracy = accuracy_score(y_test, y_pred)
+                f1 = f1_score(y_test, y_pred, average='weighted')
+                
+                print(f"✓ Match winner prediction accuracy: {accuracy:.3f}")
+                print(f"✓ F1-Score: {f1:.3f}")
+                print(f"✓ Result classes: {list(self.result_encoder.classes_)}")
             else:
-                df_processed[col].fillna('Unknown', inplace=True)
-    
-    return df_processed
-
-def encode_team_features(df):
-    """
-    Encode home_team and away_team using Label Encoding.
-    
-    Args:
-        df (pd.DataFrame): Input dataframe
+                print("Only one class found in results, skipping classification model")
         
-    Returns:
-        pd.DataFrame: Dataframe with encoded team features
-        dict: Dictionary containing label encoders for teams
-    """
-    df_encoded = df.copy()
-    encoders = {}
-    
-    team_columns = ['home_team', 'away_team']
-    
-    # Create a combined list of all teams for consistent encoding
-    all_teams = pd.concat([df['home_team'], df['away_team']]).unique()
-    
-    # Create and fit label encoder for teams
-    team_encoder = LabelEncoder()
-    team_encoder.fit(all_teams)
-    
-    # Apply encoding to both home and away teams
-    for col in team_columns:
-        if col in df_encoded.columns:
-            df_encoded[f'{col}_encoded'] = team_encoder.transform(df_encoded[col])
-    
-    encoders['team_encoder'] = team_encoder
-    
-    return df_encoded, encoders
-
-def prepare_features_and_targets(df):
-    """
-    Prepare feature matrix and target variables.
-    
-    Args:
-        df (pd.DataFrame): Preprocessed dataframe
+        # Train goal prediction models
+        if y_home_goals is not None and y_away_goals is not None:
+            print(f"\n--- Training Goal Prediction Models ---")
+            
+            # Remove rows with missing targets
+            mask = (y_home_goals.notna() & y_away_goals.notna() & X.notna().all(axis=1))
+            X_reg = X[mask]
+            y_home = y_home_goals[mask]
+            y_away = y_away_goals[mask]
+            
+            print(f"Training samples: {len(X_reg)}")
+            print(f"Average goals - Home: {y_home.mean():.2f}, Away: {y_away.mean():.2f}")
+            
+            if len(X_reg) > 5:
+                # Split data
+                X_train, X_test, y_home_train, y_home_test = train_test_split(
+                    X_reg, y_home, test_size=0.2, random_state=42
+                )
+                _, _, y_away_train, y_away_test = train_test_split(
+                    X_reg, y_away, test_size=0.2, random_state=42
+                )
+                
+                # Use same scaler as classification or create new one
+                if self.scaler is None:
+                    self.scaler = StandardScaler()
+                    X_train_scaled = self.scaler.fit_transform(X_train)
+                else:
+                    X_train_scaled = self.scaler.transform(X_train)
+                
+                X_test_scaled = self.scaler.transform(X_test)
+                
+                # Choose models
+                if model_type == 'xgboost' and XGBOOST_AVAILABLE:
+                    self.home_goals_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
+                    self.away_goals_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
+                else:
+                    self.home_goals_model = RandomForestRegressor(n_estimators=100, random_state=42)
+                    self.away_goals_model = RandomForestRegressor(n_estimators=100, random_state=42)
+                
+                # Train models
+                self.home_goals_model.fit(X_train_scaled, y_home_train)
+                self.away_goals_model.fit(X_train_scaled, y_away_train)
+                
+                # Evaluate
+                home_pred = self.home_goals_model.predict(X_test_scaled)
+                away_pred = self.away_goals_model.predict(X_test_scaled)
+                
+                home_mae = mean_absolute_error(y_home_test, home_pred)
+                away_mae = mean_absolute_error(y_away_test, away_pred)
+                home_r2 = r2_score(y_home_test, home_pred)
+                away_r2 = r2_score(y_away_test, away_pred)
+                
+                print(f"✓ Home goals MAE: {home_mae:.3f}, R²: {home_r2:.3f}")
+                print(f"✓ Away goals MAE: {away_mae:.3f}, R²: {away_r2:.3f}")
         
-    Returns:
-        tuple: (X, y_classification, y_regression_home, y_regression_away)
-    """
-    # Define feature columns (excluding targets and original team names)
-    feature_cols = [
-        'home_last5_points', 'away_last5_points',
-        'home_last5_goals_scored', 'away_last5_goals_scored',
-        'home_last5_goals_conceded', 'away_last5_goals_conceded',
-        'head_to_head_wins_home', 'head_to_head_wins_away',
-        'home_league_position', 'away_league_position',
-        'home_team_encoded', 'away_team_encoded'
-    ]
+        print("\n=== Model Training Completed Successfully! ===")
     
-    # Ensure all feature columns exist
-    available_features = [col for col in feature_cols if col in df.columns]
-    
-    X = df[available_features].copy()
-    y_classification = df['result'].copy()
-    y_regression_home = df['home_goals'].copy()
-    y_regression_away = df['away_goals'].copy()
-    
-    return X, y_classification, y_regression_home, y_regression_away
-
-def scale_features(X_train, X_test):
-    """
-    Scale numerical features using StandardScaler.
-    
-    Args:
-        X_train (pd.DataFrame): Training features
-        X_test (pd.DataFrame): Test features
+    def predict_match(self, home_team, away_team, home_stats=None, away_stats=None):
+        """Predict match outcome and score"""
         
-    Returns:
-        tuple: (X_train_scaled, X_test_scaled, scaler)
-    """
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Convert back to DataFrame to maintain column names
-    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
-    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
-    
-    return X_train_scaled, X_test_scaled, scaler
-
-# ----------------------------
-# MODEL TRAINING AND EVALUATION
-# ----------------------------
-
-def train_classification_model(X_train, X_test, y_train, y_test, model_type='random_forest'):
-    """
-    Train and evaluate classification model for match result prediction.
-    
-    Args:
-        X_train, X_test: Training and test features
-        y_train, y_test: Training and test targets
-        model_type (str): 'random_forest' or 'xgboost'
+        if self.classification_model is None and self.home_goals_model is None:
+            return {"error": "No trained models available. Please train models first."}
         
-    Returns:
-        tuple: (trained_model, metrics_dict, predictions)
-    """
-    if model_type == 'random_forest':
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-    elif model_type == 'xgboost':
-        model = xgb.XGBClassifier(n_estimators=100, random_state=42, use_label_encoder=False, eval_metric='logloss')
-    else:
-        raise ValueError("model_type must be 'random_forest' or 'xgboost'")
-    
-    # Train model
-    model.fit(X_train, y_train)
-    
-    # Make predictions
-    y_pred = model.predict(X_test)
-    
-    # Calculate metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average='weighted')  # Use weighted for multi-class
-    cm = confusion_matrix(y_test, y_pred)
-    
-    metrics = {
-        'accuracy': accuracy,
-        'f1_score': f1,
-        'confusion_matrix': cm
-    }
-    
-    return model, metrics, y_pred
-
-def train_regression_models(X_train, X_test, y_train_home, y_train_away, y_test_home, y_test_away, model_type='random_forest'):
-    """
-    Train and evaluate regression models for home and away goals prediction.
-    
-    Args:
-        X_train, X_test: Training and test features
-        y_train_home, y_train_away: Training targets for home and away goals
-        y_test_home, y_test_away: Test targets for home and away goals
-        model_type (str): 'random_forest' or 'xgboost'
+        # Default stats if not provided
+        if home_stats is None:
+            home_stats = {
+                'points_last5': 8,
+                'goals_scored_last5': 7,
+                'goals_conceded_last5': 5,
+                'league_position': 10,
+                'goal_difference': 2
+            }
         
-    Returns:
-        tuple: (home_model, away_model, metrics_dict, home_pred, away_pred)
-    """
-    if model_type == 'random_forest':
-        home_model = RandomForestRegressor(n_estimators=100, random_state=42)
-        away_model = RandomForestRegressor(n_estimators=100, random_state=42)
-    elif model_type == 'xgboost':
-        home_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-        away_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-    else:
-        raise ValueError("model_type must be 'random_forest' or 'xgboost'")
-    
-    # Train models
-    home_model.fit(X_train, y_train_home)
-    away_model.fit(X_train, y_train_away)
-    
-    # Make predictions
-    home_pred = home_model.predict(X_test)
-    away_pred = away_model.predict(X_test)
-    
-    # Calculate metrics for home goals
-    mae_home = mean_absolute_error(y_test_home, home_pred)
-    rmse_home = np.sqrt(mean_squared_error(y_test_home, home_pred))
-    
-    # Calculate metrics for away goals
-    mae_away = mean_absolute_error(y_test_away, away_pred)
-    rmse_away = np.sqrt(mean_squared_error(y_test_away, away_pred))
-    
-    metrics = {
-        'home_goals': {'mae': mae_home, 'rmse': rmse_home},
-        'away_goals': {'mae': mae_away, 'rmse': rmse_away}
-    }
-    
-    return home_model, away_model, metrics, home_pred, away_pred
-
-def print_evaluation_results(class_metrics, reg_metrics, model_type):
-    """
-    Print evaluation results in a clear format.
-    
-    Args:
-        class_metrics (dict): Classification metrics
-        reg_metrics (dict): Regression metrics
-        model_type (str): Type of model used
-    """
-    print(f"\n{'='*60}")
-    print(f"EVALUATION RESULTS - {model_type.upper()}")
-    print(f"{'='*60}")
-    
-    # Classification results
-    print(f"\n📊 CLASSIFICATION (Match Result Prediction):")
-    print(f"   Accuracy: {class_metrics['accuracy']:.4f}")
-    print(f"   F1-Score: {class_metrics['f1_score']:.4f}")
-    print(f"\n   Confusion Matrix:")
-    print(f"   {class_metrics['confusion_matrix']}")
-    
-    # Regression results
-    print(f"\n📈 REGRESSION (Goals Prediction):")
-    print(f"   Home Goals - MAE: {reg_metrics['home_goals']['mae']:.4f}, RMSE: {reg_metrics['home_goals']['rmse']:.4f}")
-    print(f"   Away Goals - MAE: {reg_metrics['away_goals']['mae']:.4f}, RMSE: {reg_metrics['away_goals']['rmse']:.4f}")
-
-def show_example_predictions(df_test, y_class_pred, home_goals_pred, away_goals_pred, num_examples=5):
-    """
-    Show example predictions for test samples.
-    
-    Args:
-        df_test (pd.DataFrame): Test dataframe
-        y_class_pred (array): Predicted match results
-        home_goals_pred (array): Predicted home goals
-        away_goals_pred (array): Predicted away goals
-        num_examples (int): Number of examples to show
-    """
-    print(f"\n{'='*80}")
-    print(f"EXAMPLE PREDICTIONS (First {num_examples} test samples)")
-    print(f"{'='*80}")
-    
-    # Round predicted goals to nearest integer for display
-    home_goals_pred_rounded = np.round(home_goals_pred).astype(int)
-    away_goals_pred_rounded = np.round(away_goals_pred).astype(int)
-    
-    for i in range(min(num_examples, len(df_test))):
-        actual_result = df_test.iloc[i]['result']
-        actual_home_goals = df_test.iloc[i]['home_goals']
-        actual_away_goals = df_test.iloc[i]['away_goals']
+        if away_stats is None:
+            away_stats = {
+                'points_last5': 7,
+                'goals_scored_last5': 6,
+                'goals_conceded_last5': 6,
+                'league_position': 12,
+                'goal_difference': 0
+            }
         
-        print(f"\nMatch {i+1}: {df_test.iloc[i]['home_team']} vs {df_test.iloc[i]['away_team']}")
-        print(f"   Actual: {actual_home_goals}-{actual_away_goals} ({actual_result})")
-        print(f"   Predicted: {home_goals_pred_rounded[i]}-{away_goals_pred_rounded[i]} ({y_class_pred[i]})")
+        # Create prediction DataFrame
+        pred_data = {
+            'home_team': [str(home_team)],
+            'away_team': [str(away_team)],
+            'home_points_last5': [home_stats['points_last5']],
+            'away_points_last5': [away_stats['points_last5']],
+            'home_goals_scored_last5': [home_stats['goals_scored_last5']],
+            'away_goals_scored_last5': [away_stats['goals_scored_last5']],
+            'home_goals_conceded_last5': [home_stats['goals_conceded_last5']],
+            'away_goals_conceded_last5': [away_stats['goals_conceded_last5']],
+            'home_league_position': [home_stats['league_position']],
+            'away_league_position': [away_stats['league_position']],
+            'goal_difference_home': [home_stats['goal_difference']],
+            'goal_difference_away': [away_stats['goal_difference']]
+        }
+        
+        pred_df = pd.DataFrame(pred_data)
+        
+        # Prepare features
+        X_pred = self.prepare_features(pred_df)
+        
+        # Scale features
+        if self.scaler is not None:
+            X_pred_scaled = self.scaler.transform(X_pred)
+        else:
+            X_pred_scaled = X_pred.values
+        
+        prediction_result = {}
+        
+        # Predict match winner
+        if self.classification_model is not None and self.result_encoder is not None:
+            try:
+                result_proba = self.classification_model.predict_proba(X_pred_scaled)[0]
+                result_pred = self.classification_model.predict(X_pred_scaled)[0]
+                
+                result_label = self.result_encoder.inverse_transform([result_pred])[0]
+                
+                # Get probabilities
+                classes = self.result_encoder.classes_
+                probabilities = {classes[i]: result_proba[i] for i in range(len(classes))}
+                
+                prediction_result['winner'] = result_label
+                prediction_result['probabilities'] = probabilities
+            except Exception as e:
+                print(f"Error in winner prediction: {e}")
+        
+        # Predict goals
+        if self.home_goals_model is not None and self.away_goals_model is not None:
+            try:
+                home_goals_pred = self.home_goals_model.predict(X_pred_scaled)[0]
+                away_goals_pred = self.away_goals_model.predict(X_pred_scaled)[0]
+                
+                prediction_result['home_goals'] = max(0, round(home_goals_pred))
+                prediction_result['away_goals'] = max(0, round(away_goals_pred))
+                prediction_result['predicted_score'] = f"{prediction_result['home_goals']}-{prediction_result['away_goals']}"
+            except Exception as e:
+                print(f"Error in goal prediction: {e}")
+        
+        return prediction_result
+    
+    def print_prediction(self, home_team, away_team, prediction):
+        """Print prediction in a formatted way"""
+        print(f"\n{'='*70}")
+        print(f"🏆 MATCH PREDICTION: {home_team} vs {away_team}")
+        print(f"{'='*70}")
+        
+        if 'error' in prediction:
+            print(f"❌ {prediction['error']}")
+            return
+        
+        if 'predicted_score' in prediction:
+            print(f"⚽ Predicted Score: {prediction['predicted_score']}")
+        
+        if 'winner' in prediction:
+            winner_symbols = {'H': '🏠', 'A': '✈️', 'D': '🤝'}
+            winner_text = {
+                'H': f"{home_team} Win",
+                'A': f"{away_team} Win", 
+                'D': "Draw"
+            }
+            symbol = winner_symbols.get(prediction['winner'], '❓')
+            print(f"{symbol} Predicted Winner: {winner_text.get(prediction['winner'], 'Unknown')}")
+        
+        if 'probabilities' in prediction:
+            print(f"\n📊 Win Probabilities:")
+            for outcome, prob in prediction['probabilities'].items():
+                outcome_text = {
+                    'H': f"  🏠 {home_team} Win",
+                    'A': f"  ✈️  {away_team} Win",
+                    'D': "  🤝 Draw"
+                }
+                print(f"{outcome_text.get(outcome, outcome)}: {prob:.1%}")
 
-# ----------------------------
-# MAIN EXECUTION FUNCTION
-# ----------------------------
-
-def main(filepath, model_type='random_forest', test_size=0.2):
-    """
-    Main function to run the complete pipeline.
+# Main execution function
+def main():
+    print("🚀 Starting Football Match Predictor")
+    print("="*50)
     
-    Args:
-        filepath (str): Path to Excel file
-        model_type (str): 'random_forest' or 'xgboost'
-        test_size (float): Proportion of dataset to include in test split
-    """
-    print("🚀 Starting Football Match Prediction Pipeline...")
+    # Initialize predictor
+    predictor = FootballPredictor()
     
-    # Load and preprocess data
-    print("1. Loading and preprocessing data...")
-    df = load_and_preprocess_data(filepath)
-    df = handle_missing_values(df)
-    
-    # Encode team features
-    print("2. Encoding team features...")
-    df_encoded, encoders = encode_team_features(df)
-    
-    # Prepare features and targets
-    print("3. Preparing features and targets...")
-    X, y_class, y_home, y_away = prepare_features_and_targets(df_encoded)
-    
-    # Split data
-    print("4. Splitting data into train/test sets...")
-    X_train, X_test, y_class_train, y_class_test = train_test_split(
-        X, y_class, test_size=test_size, random_state=42, stratify=y_class
-    )
-    
-    X_train_reg, X_test_reg, y_home_train, y_home_test = train_test_split(
-        X, y_home, test_size=test_size, random_state=42
-    )
-    
-    _, _, y_away_train, y_away_test = train_test_split(
-        X, y_away, test_size=test_size, random_state=42
-    )
-    
-    # Scale features
-    print("5. Scaling features...")
-    X_train_scaled, X_test_scaled, scaler = scale_features(X_train, X_test)
-    
-    # Train classification model
-    print("6. Training classification model...")
-    class_model, class_metrics, y_class_pred = train_classification_model(
-        X_train_scaled, X_test_scaled, y_class_train, y_class_test, model_type
-    )
-    
-    # Train regression models
-    print("7. Training regression models...")
-    home_model, away_model, reg_metrics, home_pred, away_pred = train_regression_models(
-        X_train_scaled, X_test_scaled, y_home_train, y_away_train, y_home_test, y_away_test, model_type
-    )
-    
-    # Print results
-    print_evaluation_results(class_metrics, reg_metrics, model_type)
-    
-    # Show example predictions
-    df_test_sample = df.iloc[X_test.index].copy()
-    show_example_predictions(df_test_sample, y_class_pred, home_pred, away_pred)
-    
-    print(f"\n✅ Pipeline completed successfully!")
-    
-    # Return models and results for further use
-    return {
-        'classification_model': class_model,
-        'home_goals_model': home_model,
-        'away_goals_model': away_model,
-        'scaler': scaler,
-        'encoders': encoders,
-        'metrics': {'classification': class_metrics, 'regression': reg_metrics}
-    }
-
-# ----------------------------
-# USAGE EXAMPLE
-# ----------------------------
+    try:
+        # Train models with your data
+        predictor.train_models("enhanced_football_matches.xlsx", model_type='random_forest')
+        
+        print(f"\n{'='*70}")
+        print("📈 MAKING SAMPLE PREDICTIONS")
+        print(f"{'='*70}")
+        
+        # Test predictions with teams from your dataset
+        test_matches = [
+            ("Arsenal", "Chelsea"),
+            ("Manchester City", "Liverpool"), 
+            ("Tottenham", "Everton")
+        ]
+        
+        for home, away in test_matches:
+            # Example with custom stats
+            home_stats = {
+                'points_last5': 12,
+                'goals_scored_last5': 10,
+                'goals_conceded_last5': 3,
+                'league_position': 3,
+                'goal_difference': 7
+            }
+            
+            away_stats = {
+                'points_last5': 9,
+                'goals_scored_last5': 7,
+                'goals_conceded_last5': 5,
+                'league_position': 8,
+                'goal_difference': 2
+            }
+            
+            prediction = predictor.predict_match(home, away, home_stats, away_stats)
+            predictor.print_prediction(home, away, prediction)
+        
+        print(f"\n{'='*70}")
+        print("✅ PREDICTION SYSTEM READY!")
+        print("You can now predict any match using predictor.predict_match()")
+        print(f"{'='*70}")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
-    # Replace 'your_football_data.xlsx' with your actual file path
-    FILEPATH = "your_football_data.xlsx"
-    
-    # Run with Random Forest
-    print("Running with Random Forest...")
-    results_rf = main(FILEPATH, model_type='random_forest')
-    
-    # Uncomment to run with XGBoost
-    # print("\n" + "="*80)
-    # print("Running with XGBoost...")
-    # results_xgb = main(FILEPATH, model_type='xgboost')
+    main()
