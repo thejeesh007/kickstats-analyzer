@@ -1,13 +1,14 @@
-# football_ml_pipeline.py
-# Clean, modular pipeline for classification (result) and regression (goals) on football matches.
+# prediction_ML.py
+# Clean, modular pipeline for football match prediction with safe handling of empty/labeled subsets.
 # - Loads Excel/CSV
 # - Normalizes column names
-# - Handles missing values
-# - Encodes teams (OneHot)
-# - Scales numerical features
-# - Trains RF/XGBoost classifiers & regressors
-# - Evaluates with Accuracy, F1, Confusion Matrix (classification) and MAE, RMSE (regression)
-# - Prints example predictions
+# - Parses goals from final_score if needed
+# - Derives result (H/D/A)
+# - Builds date features
+# - Handles missing values, encodes teams, scales numerics
+# - Trains classification (result) and regression (home_goals, away_goals) separately
+# - Skips tasks if no labeled rows, avoiding train_test_split crashes
+# - Prints metrics and example predictions
 
 from __future__ import annotations
 
@@ -139,7 +140,6 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 def parse_final_score_to_goals(df: pd.DataFrame) -> pd.DataFrame:
     """
     If home_goals/away_goals not present, try to parse from 'final_score' like '2-1'.
-    Only for completed matches where possible.
     """
     if "home_goals" in df.columns and "away_goals" in df.columns:
         return df
@@ -232,13 +232,25 @@ def select_feature_sets(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     return categorical, numeric
 
 
+def make_onehot() -> OneHotEncoder:
+    """
+    Build OneHotEncoder compatible with different scikit-learn versions.
+    """
+    try:
+        # scikit-learn >= 1.2
+        return OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+    except TypeError:
+        # older versions
+        return OneHotEncoder(handle_unknown="ignore", sparse=True)
+
+
 def build_preprocessor(categorical: List[str], numeric: List[str]) -> ColumnTransformer:
     """
     ColumnTransformer that imputes and encodes categorical, imputes and scales numeric.
     """
     cat_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=True)),
+        ("onehot", make_onehot()),
     ])
 
     num_pipeline = Pipeline(steps=[
@@ -367,6 +379,25 @@ def make_prediction_frame(
     return out.reset_index(drop=True)
 
 
+def safe_split(X, y, test_size=0.2, random_state=42, stratify=None):
+    """
+    Split safely, handling tiny or empty datasets:
+    - If n=0: return Nones to signal skipping
+    - If n<2: use the full data as both train/test (not a reliable eval but avoids crash)
+    - Else: standard train_test_split, with fallback if stratify fails
+    """
+    n = len(X)
+    if n == 0:
+        return None, None, None, None
+    if n < 2:
+        warnings.warn("Not enough samples to split; using all data for both train and test.")
+        return X, X, y, y
+    try:
+        return train_test_split(X, y, test_size=test_size, random_state=random_state, stratify=stratify)
+    except ValueError:
+        return train_test_split(X, y, test_size=test_size, random_state=random_state)
+
+
 # ---------------------------
 # End-to-end runner
 # ---------------------------
@@ -378,104 +409,99 @@ def main(cfg: Config):
     # 2) Normalize
     df = normalize_columns(df)
 
-    # 3) Parse goals if needed
+    # 3) Parse goals if needed and derive result
     df = parse_final_score_to_goals(df)
     df = derive_result(df)
 
     # 4) Date features
     df = add_date_features(df)
 
-    # 5) Keep only rows with targets for training
-    has_goals = ("home_goals" in df.columns) and ("away_goals" in df.columns)
-    has_result = ("result" in df.columns)
-
-    if not has_result and not has_goals:
-        raise ValueError(
-            "No targets found. Please ensure home_goals/away_goals exist or a parsable final_score for completed matches."
-        )
-
-    # If match_status/is_completed exist, optionally filter completed matches
-    if "is_completed" in df.columns:
-        df = df[df["is_completed"] == True].copy()
-
-    # Drop rows with missing targets
-    if has_result:
-        df = df[df["result"].isin(["H", "D", "A"])]
-    if has_goals:
-        df = df[~df[["home_goals", "away_goals"]].isna().any(axis=1)]
-
-    if len(df) < 10:
-        warnings.warn("Very few labeled rows available; metrics may be unreliable.")
-
-    # 6) Feature selection
+    # 5) Feature selection
     categorical, numeric = select_feature_sets(df)
     feature_cols = categorical + numeric
-
-    # Minimal checks
-    required_cats = {"home_team", "away_team"}
-    if not required_cats.issubset(set(categorical)):
-        warnings.warn("home_team/away_team not both present; results may degrade.")
-
     if len(feature_cols) == 0:
         raise ValueError("No usable feature columns were found after normalization.")
 
-    # 7) Split
-    X = df[feature_cols].copy()
+    # 6) Build separate masks for each task (do NOT globally drop rows)
+    mask_cls = pd.Series(False, index=df.index)
+    if "result" in df.columns:
+        mask_cls = df["result"].isin(["H", "D", "A"])
 
-    # Targets
-    y_cls = df["result"] if has_result else None
-    y_reg = df[["home_goals", "away_goals"]].values if has_goals else None
+    mask_reg = pd.Series(False, index=df.index)
+    if {"home_goals", "away_goals"}.issubset(df.columns):
+        mask_reg = df[["home_goals", "away_goals"]].notna().all(axis=1)
 
-    # For classification split with stratify when available
-    if y_cls is not None and len(np.unique(y_cls)) > 1:
-        X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(
-            X, y_cls, test_size=cfg.test_size, random_state=cfg.random_state, stratify=y_cls
-        )
-    else:
-        X_train_c = X_test_c = y_train_c = y_test_c = None
+    # 7) Create task-specific datasets
+    X_cls = df.loc[mask_cls, feature_cols].copy()
+    y_cls = df.loc[mask_cls, "result"].copy() if mask_cls.any() else None
 
-    # For regression split
-    if y_reg is not None:
-        X_train_r, X_test_r, y_train_r, y_test_r = train_test_split(
-            X, y_reg, test_size=cfg.test_size, random_state=cfg.random_state
-        )
-    else:
-        X_train_r = X_test_r = y_train_r = y_test_r = None
+    X_reg = df.loc[mask_reg, feature_cols].copy()
+    y_reg = df.loc[mask_reg, ["home_goals", "away_goals"]].values if mask_reg.any() else None
 
-    # 8) Build preprocessors
+    # 8) Report counts
+    print("=== Labeled sample counts ===")
+    print(f"Classification labeled rows (result): {int(mask_cls.sum())}")
+    print(f"Regression labeled rows (goals):      {int(mask_reg.sum())}")
+
+    if mask_cls.sum() < 10 or mask_reg.sum() < 10:
+        warnings.warn("Very few labeled rows available; metrics may be unreliable.")
+
+    # 9) Preprocessor
     preprocessor = build_preprocessor(categorical, numeric)
 
-    # 9) Classification pipeline
+    # 10) Classification pipeline
     clf_pipeline = None
     clf_metrics = None
     y_pred_cls = None
+    X_test_c = None
+    y_test_c = None
 
-    if X_train_c is not None:
-        clf_estimator = get_classifier(cfg.clf_model, cfg.random_state)
-        clf_pipeline = Pipeline(steps=[
-            ("preprocess", preprocessor),
-            ("model", clf_estimator),
-        ])
-        clf_pipeline.fit(X_train_c, y_train_c)
-        y_pred_cls = clf_pipeline.predict(X_test_c)
-        clf_metrics = evaluate_classification(y_test_c, y_pred_cls)
+    if y_cls is not None and len(X_cls) > 0:
+        # Stratify only if multiple classes exist
+        stratify = y_cls if len(np.unique(y_cls)) > 1 else None
+        X_train_c, X_test_c, y_train_c, y_test_c = safe_split(
+            X_cls, y_cls, test_size=cfg.test_size, random_state=cfg.random_state, stratify=stratify
+        )
+        if X_train_c is not None:
+            clf_estimator = get_classifier(cfg.clf_model, cfg.random_state)
+            clf_pipeline = Pipeline(steps=[
+                ("preprocess", preprocessor),
+                ("model", clf_estimator),
+            ])
+            clf_pipeline.fit(X_train_c, y_train_c)
+            y_pred_cls = clf_pipeline.predict(X_test_c)
+            clf_metrics = evaluate_classification(y_test_c, y_pred_cls)
+        else:
+            print("Skipping classification: no labeled samples for result.")
+    else:
+        print("Skipping classification: no labeled samples for result.")
 
-    # 10) Regression pipeline
+    # 11) Regression pipeline
     reg_pipeline = None
     reg_metrics = None
     y_pred_reg = None
+    X_test_r = None
+    y_test_r = None
 
-    if X_train_r is not None:
-        reg_estimator = get_regressor(cfg.reg_model, cfg.random_state)
-        reg_pipeline = Pipeline(steps=[
-            ("preprocess", preprocessor),
-            ("model", reg_estimator),
-        ])
-        reg_pipeline.fit(X_train_r, y_train_r)
-        y_pred_reg = reg_pipeline.predict(X_test_r)
-        reg_metrics = evaluate_regression(y_test_r, y_pred_reg)
+    if y_reg is not None and len(X_reg) > 0:
+        X_train_r, X_test_r, y_train_r, y_test_r = safe_split(
+            X_reg, y_reg, test_size=cfg.test_size, random_state=cfg.random_state
+        )
+        if X_train_r is not None:
+            reg_estimator = get_regressor(cfg.reg_model, cfg.random_state)
+            reg_pipeline = Pipeline(steps=[
+                ("preprocess", preprocessor),
+                ("model", reg_estimator),
+            ])
+            reg_pipeline.fit(X_train_r, y_train_r)
+            y_pred_reg = reg_pipeline.predict(X_test_r)
+            reg_metrics = evaluate_regression(y_test_r, y_pred_reg)
+        else:
+            print("Skipping regression: no labeled samples for goals.")
+    else:
+        print("Skipping regression: no labeled samples for goals.")
 
-    # 11) Print results
+    # 12) Print results
     print("\n=== Configuration ===")
     print(cfg)
 
@@ -524,7 +550,7 @@ def main(cfg: Config):
         print(examples_reg)
 
     if clf_metrics is None and reg_metrics is None:
-        raise ValueError("No trainable task found. Ensure at least classification or regression targets are present.")
+        print("\nNo trainable task found: add completed matches with final_score or explicit home_goals/away_goals to proceed.")
 
     print("\nDone.")
 
