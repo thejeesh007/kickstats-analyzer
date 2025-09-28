@@ -1,722 +1,472 @@
 import requests
-from bs4 import BeautifulSoup
 import pandas as pd
-import re
 import time
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 import logging
 import json
-from datetime import datetime, timedelta
-from urllib.parse import urljoin, urlparse
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('football_scraper_enhanced.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-class EnhancedFootballScraper:
-    def __init__(self, delay=3):
-        """Initialize scraper with session and headers"""
+class ESPNFootballScraper:
+    """
+    A class to scrape historical football match results from ESPN API
+    """
+    
+    def __init__(self, delay: float = 1.0, debug_mode: bool = False):
+        """
+        Initialize the scraper
+        
+        Args:
+            delay: Delay between requests in seconds
+            debug_mode: Enable debug logging for troubleshooting
+        """
         self.delay = delay
+        self.debug_mode = debug_mode
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Cache-Control': 'max-age=0',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
         
-        # Team mappings for consistency
-        self.team_mappings = {
-            'Man City': 'Manchester City',
-            'Man United': 'Manchester United', 
-            'Man Utd': 'Manchester United',
-            'Spurs': 'Tottenham',
-            'Tottenham Hotspur': 'Tottenham',
-            'Brighton & Hove Albion': 'Brighton',
-            'Brighton and Hove Albion': 'Brighton',
-            'Newcastle United': 'Newcastle',
-            'West Ham United': 'West Ham',
-            'Sheffield United': 'Sheffield Utd',
-            'Nottingham Forest': 'Nott\'m Forest',
-            'Wolverhampton Wanderers': 'Wolves'
-        }
+        # ESPN API base URL
+        self.api_base = "http://site.api.espn.com/apis/site/v2/sports/soccer"
+        
+        # Setup logging
+        log_level = logging.DEBUG if debug_mode else logging.INFO
+        logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(__name__)
     
-    def normalize_team_name(self, team_name):
-        """Normalize team names for consistency"""
-        if not team_name:
-            return team_name
+    def get_api_data(self, url: str) -> Optional[Dict]:
+        """
+        Fetch data from ESPN API
         
-        team_name = team_name.strip()
-        return self.team_mappings.get(team_name, team_name)
-    
-    def get_page(self, url, retries=3):
-        """Get page content with retries and delay"""
-        for attempt in range(retries):
-            try:
-                logger.info(f"Fetching: {url} (attempt {attempt + 1})")
-                time.sleep(self.delay)
-                
-                response = self.session.get(url, timeout=20)
-                response.raise_for_status()
-                
-                soup = BeautifulSoup(response.content, 'html.parser')
-                logger.info(f"Successfully fetched page: {response.status_code}")
-                return soup
-                
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Request failed (attempt {attempt + 1}): {e}")
-                if attempt == retries - 1:
-                    logger.error(f"Failed to fetch {url} after {retries} attempts")
-                    return None
-                time.sleep(self.delay * (attempt + 1))
-        
-        return None
-    
-    def parse_date(self, date_text):
-        """Enhanced date parsing with better accuracy"""
-        if not date_text:
-            return None
-        
-        date_text = str(date_text).strip()
-        
-        # Remove common prefixes/suffixes
-        date_text = re.sub(r'^(today|tomorrow|yesterday)\s*[,:]?\s*', '', date_text, flags=re.IGNORECASE)
-        date_text = re.sub(r'\s*(bst|gmt|utc)\s*$', '', date_text, flags=re.IGNORECASE)
-        
-        # Enhanced date patterns
-        patterns = [
-            # ISO formats
-            (r'(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})', '%Y-%m-%dT%H:%M'),
-            (r'(\d{4})-(\d{2})-(\d{2})', '%Y-%m-%d'),
+        Args:
+            url: The API URL to fetch
             
-            # Common formats
-            (r'(\d{1,2})/(\d{1,2})/(\d{4})', '%m/%d/%Y'),
-            (r'(\d{1,2})-(\d{1,2})-(\d{4})', '%m-%d-%Y'),
-            (r'(\d{1,2})\.(\d{1,2})\.(\d{4})', '%d.%m.%Y'),
-            
-            # Text formats
-            (r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})', '%d %b %Y'),
-            (r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),?\s+(\d{4})', '%b %d %Y'),
-            (r'(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})', '%d %B %Y'),
-            (r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})', '%B %d %Y'),
-            
-            # Relative dates
-            (r'today', 'today'),
-            (r'tomorrow', 'tomorrow'),
-            (r'yesterday', 'yesterday'),
-        ]
-        
-        for pattern, date_format in patterns:
-            if date_format in ['today', 'tomorrow', 'yesterday']:
-                if re.search(pattern, date_text.lower()):
-                    base_date = datetime.now()
-                    if date_format == 'today':
-                        return base_date
-                    elif date_format == 'tomorrow':
-                        return base_date + timedelta(days=1)
-                    elif date_format == 'yesterday':
-                        return base_date - timedelta(days=1)
-                continue
-            
-            match = re.search(pattern, date_text, re.IGNORECASE)
-            if match:
-                try:
-                    if 'T' in date_format:
-                        return datetime.strptime(match.group(), date_format.split('T')[0] + 'T%H:%M')
-                    else:
-                        return datetime.strptime(match.group(), date_format)
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"Date parsing error for '{date_text}' with pattern '{date_format}': {e}")
-                    continue
-        
-        return None
-    
-    def scrape_espn_enhanced(self):
-        """Enhanced ESPN scraping with better data extraction"""
-        logger.info("Scraping Premier League matches from ESPN (Enhanced)")
-        
-        urls = [
-            "https://www.espn.com/soccer/fixtures/_/league/ENG.1",
-            "https://www.espn.com/soccer/scoreboard/_/league/ENG.1",
-            "https://www.espn.com/soccer/schedule/_/league/ENG.1"
-        ]
-        
-        all_matches = []
-        
-        for url in urls:
-            soup = self.get_page(url)
-            if not soup:
-                continue
-                
-            # Look for JSON data in script tags
-            script_tags = soup.find_all('script', type='application/ld+json')
-            for script in script_tags:
-                try:
-                    data = json.loads(script.string)
-                    if isinstance(data, list):
-                        for item in data:
-                            if item.get('@type') == 'SportsEvent':
-                                match = self.extract_json_match_espn(item)
-                                if match:
-                                    all_matches.append(match)
-                except:
-                    continue
-            
-            # Traditional HTML parsing with enhanced selectors
-            matches_from_html = self.extract_espn_html_matches(soup)
-            all_matches.extend(matches_from_html)
-        
-        return all_matches
-    
-    def extract_json_match_espn(self, json_data):
-        """Extract match from ESPN JSON-LD data"""
+        Returns:
+            JSON response as dictionary or None if failed
+        """
         try:
-            competitors = json_data.get('competitor', [])
-            if len(competitors) < 2:
+            self.logger.info(f"Fetching API: {url}")
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            time.sleep(self.delay)  # Rate limiting
+            return data
+            
+        except requests.RequestException as e:
+            self.logger.error(f"Error fetching {url}: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Error parsing JSON from {url}: {e}")
+            return None
+    
+    def generate_season_dates(self, season_year: int) -> List[str]:
+        """
+        Generate all date strings for a football season
+        
+        Args:
+            season_year: The year the season started (e.g., 2023 for 2023-24 season)
+            
+        Returns:
+            List of date strings in YYYYMMDD format
+        """
+        dates = []
+        
+        # Premier League typically runs from August to May
+        # 2023-24 season: Aug 2023 to May 2024
+        # 2024-25 season: Aug 2024 to May 2025
+        
+        start_date = datetime(season_year, 8, 1)  # Start of August
+        end_date = datetime(season_year + 1, 5, 31)  # End of May next year
+        
+        # Generate dates for every week (matches are typically on weekends)
+        current_date = start_date
+        while current_date <= end_date:
+            dates.append(current_date.strftime("%Y%m%d"))
+            current_date += timedelta(days=3)  # Check every 3 days to catch all matches
+        
+        return dates
+    
+    def parse_match_from_api(self, game_data: Dict) -> Optional[Dict]:
+        """
+        Parse match data from ESPN API response
+        
+        Args:
+            game_data: Game data from ESPN API
+            
+        Returns:
+            Dictionary with match data or None if parsing fails
+        """
+        try:
+            match_data = {}
+            
+            # Debug: Print the structure to understand the API response
+            if self.debug_mode and hasattr(self, '_debug_printed') == False:
+                self.logger.info("DEBUG: Sample game_data structure:")
+                self.logger.info(json.dumps(game_data, indent=2)[:1000] + "...")
+                self._debug_printed = True
+            
+            # Extract date
+            date_str = game_data.get('date', '')
+            if date_str:
+                match_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                match_data['date'] = match_date.date()
+            else:
                 return None
             
-            home_team = competitors[0].get('name', '')
-            away_team = competitors[1].get('name', '')
+            # Extract status - be more flexible with status checking
+            status = game_data.get('status', {})
+            status_type = status.get('type', {})
+            match_data['status'] = status_type.get('description', status_type.get('name', 'Unknown'))
             
-            # Get match date
-            start_date = json_data.get('startDate')
-            match_date = self.parse_date(start_date) if start_date else None
+            # More flexible status checking - accept various finished states
+            status_id = int(status_type.get('id', 0))
+            status_name = status_type.get('name', '').lower()
+            status_desc = status_type.get('description', '').lower()
+            status_completed = status_type.get('completed', False)  # Fixed: get completed from status_type, not status
             
-            # Get score if available
-            score = None
-            if 'result' in json_data:
-                home_score = json_data['result'].get('homeScore')
-                away_score = json_data['result'].get('awayScore')
-                if home_score is not None and away_score is not None:
-                    score = f"{home_score}-{away_score}"
+            # Check if match is finished (be more permissive)
+            is_finished = (
+                status_id == 28 or  # ESPN uses 28 for "Full Time"
+                status_id == 3 or   # Standard "Final" 
+                status_completed or  # Check the completed flag
+                'final' in status_name or 
+                'final' in status_desc or
+                'finished' in status_name or 
+                'finished' in status_desc or
+                'full_time' in status_name or
+                'full time' in status_desc or
+                status_id in [3, 4, 28]  # Include ESPN's Full Time status ID
+            )
             
-            return {
-                'date': match_date,
-                'home_team': self.normalize_team_name(home_team),
-                'away_team': self.normalize_team_name(away_team),
-                'score': score,
-                'status': json_data.get('eventStatus', {}).get('type', 'unknown'),
-                'source': 'espn_json'
-            }
-        except Exception as e:
-            logger.debug(f"Error extracting JSON match: {e}")
-            return None
-    
-    def extract_espn_html_matches(self, soup):
-        """Extract matches from ESPN HTML with enhanced selectors"""
-        matches = []
-        
-        # Multiple selectors for different ESPN layouts
-        selectors = [
-            {'container': '.scoreboards-container', 'match': '.scoreboard'},
-            {'container': '.fixtures-container', 'match': '.fixture'},
-            {'container': '.Table__TR', 'match': None},
-            {'container': '[data-testid="soccer-scoreboard"]', 'match': None},
-            {'container': '.ResponsiveTable', 'match': 'tr'}
-        ]
-        
-        for selector_set in selectors:
-            containers = soup.select(selector_set['container'])
+            if not is_finished:
+                # More detailed debug logging
+                self.logger.debug(f"Skipping non-finished match: status_id={status_id}, name='{status_name}', desc='{status_desc}', completed={status_completed}")
+                return None
             
-            for container in containers:
-                if selector_set['match']:
-                    match_elements = container.select(selector_set['match'])
-                else:
-                    match_elements = [container]
-                
-                for match_elem in match_elements:
-                    match = self.extract_match_from_element(match_elem, 'espn')
-                    if match:
-                        matches.append(match)
-        
-        return matches
-    
-    def extract_match_from_element(self, element, source):
-        """Enhanced match extraction from HTML element"""
-        try:
-            # Find team names using multiple strategies
-            teams = []
+            # Extract teams and scores
+            competitions = game_data.get('competitions', [])
+            if not competitions:
+                self.logger.debug("No competitions found in game data")
+                return None
             
-            # Strategy 1: Look for team links
-            team_links = element.select('a[href*="team"]')
-            for link in team_links:
-                team_name = link.get_text(strip=True)
-                if team_name and len(team_name) > 1:
-                    teams.append(self.normalize_team_name(team_name))
+            competition = competitions[0]
+            competitors = competition.get('competitors', [])
             
-            # Strategy 2: Look for team spans/divs
-            if not teams:
-                team_selectors = [
-                    '.team-name', '.team', '.competitor-name',
-                    '[class*="team"]', '[class*="competitor"]'
-                ]
-                
-                for selector in team_selectors:
-                    team_elements = element.select(selector)
-                    for elem in team_elements:
-                        text = elem.get_text(strip=True)
-                        if text and len(text) > 2 and not text.isdigit():
-                            teams.append(self.normalize_team_name(text))
+            if len(competitors) != 2:
+                self.logger.debug(f"Expected 2 competitors, found {len(competitors)}")
+                return None
             
-            # Strategy 3: Look in table cells
-            if not teams:
-                cells = element.select('td, th')
-                for cell in cells:
-                    text = cell.get_text(strip=True)
-                    if (len(text) > 2 and not text.isdigit() and 
-                        not re.match(r'^\d+[:-]\d+', text) and
-                        not self.parse_date(text)):
-                        teams.append(self.normalize_team_name(text))
+            # ESPN API has competitors in array, need to identify home/away
+            home_team = None
+            away_team = None
             
-            # Find scores
-            score = None
-            score_selectors = [
-                '.score', '.final-score', '[class*="score"]'
-            ]
+            for competitor in competitors:
+                home_away = competitor.get('homeAway', '')
+                if home_away == 'home':
+                    home_team = competitor
+                elif home_away == 'away':
+                    away_team = competitor
             
-            for selector in score_selectors:
-                score_elem = element.select_one(selector)
-                if score_elem:
-                    score_text = score_elem.get_text(strip=True)
-                    if re.match(r'^\d+[:-]\d+$', score_text):
-                        score = score_text.replace(':', '-')
-                        break
+            if not home_team or not away_team:
+                # Fallback: assume first is home, second is away
+                home_team = competitors[0]
+                away_team = competitors[1]
+                self.logger.debug("Using fallback home/away assignment")
             
-            # If no score found, look in text content
-            if not score:
-                all_text = element.get_text()
-                score_match = re.search(r'\b(\d+)[:-](\d+)\b', all_text)
-                if score_match:
-                    score = f"{score_match.group(1)}-{score_match.group(2)}"
+            # Extract team names - try multiple fields
+            def get_team_name(competitor):
+                team = competitor.get('team', {})
+                return (team.get('displayName') or 
+                       team.get('name') or 
+                       team.get('shortDisplayName') or 
+                       competitor.get('name', 'Unknown'))
             
-            # Find match date
-            match_date = None
+            match_data['home_team'] = get_team_name(home_team)
+            match_data['away_team'] = get_team_name(away_team)
             
-            # Look for datetime attributes
-            time_elements = element.select('time[datetime]')
-            for time_elem in time_elements:
-                match_date = self.parse_date(time_elem.get('datetime'))
-                if match_date:
-                    break
-            
-            # Look for date in text
-            if not match_date:
-                date_selectors = ['.date', '.match-date', '[class*="date"]', 'time']
-                for selector in date_selectors:
-                    date_elem = element.select_one(selector)
-                    if date_elem:
-                        match_date = self.parse_date(date_elem.get_text(strip=True))
-                        if match_date:
-                            break
-            
-            # Validate and return
-            if len(teams) >= 2:
-                return {
-                    'date': match_date,
-                    'home_team': teams[0],
-                    'away_team': teams[1], 
-                    'score': score,
-                    'source': source,
-                    'status': 'completed' if score else 'scheduled'
-                }
-                
-        except Exception as e:
-            logger.debug(f"Error extracting match from element: {e}")
-        
-        return None
-    
-    def get_team_stats_enhanced(self, team_name, source_url=None):
-        """Get enhanced team statistics from multiple sources"""
-        try:
-            # Try to get real stats from team page
-            if source_url:
-                team_soup = self.get_page(source_url)
-                if team_soup:
-                    stats = self.extract_team_stats_from_page(team_soup)
-                    if stats:
-                        return stats
-            
-            # Fallback to estimated stats based on team strength
-            return self.get_estimated_team_stats(team_name)
-            
-        except Exception as e:
-            logger.debug(f"Error getting team stats for {team_name}: {e}")
-            return self.get_estimated_team_stats(team_name)
-    
-    def extract_team_stats_from_page(self, soup):
-        """Extract actual team stats from team page"""
-        try:
-            stats = {}
-            
-            # Look for stats tables
-            stat_tables = soup.find_all(['table', 'div'], class_=lambda x: x and 'stat' in str(x).lower())
-            
-            for table in stat_tables:
-                rows = table.find_all(['tr', 'div'])
-                for row in rows:
-                    cells = row.find_all(['td', 'span', 'div'])
-                    if len(cells) >= 2:
-                        stat_name = cells[0].get_text(strip=True).lower()
-                        stat_value = cells[1].get_text(strip=True)
-                        
-                        if 'points' in stat_name:
-                            try:
-                                stats['points'] = int(re.search(r'\d+', stat_value).group())
-                            except:
-                                pass
-                        elif 'goals scored' in stat_name or 'goals for' in stat_name:
-                            try:
-                                stats['goals_scored'] = int(re.search(r'\d+', stat_value).group())
-                            except:
-                                pass
-                        elif 'goals conceded' in stat_name or 'goals against' in stat_name:
-                            try:
-                                stats['goals_conceded'] = int(re.search(r'\d+', stat_value).group())
-                            except:
-                                pass
-                        elif 'position' in stat_name:
-                            try:
-                                stats['league_position'] = int(re.search(r'\d+', stat_value).group())
-                            except:
-                                pass
-            
-            return stats if stats else None
-            
-        except Exception as e:
-            logger.debug(f"Error extracting team stats from page: {e}")
-            return None
-    
-    def get_estimated_team_stats(self, team_name):
-        """Get estimated team statistics based on historical performance"""
-        # Enhanced team classifications with more realistic stats
-        premier_league_teams = {
-            # Top 6
-            'Manchester City': {'tier': 1, 'points': 13, 'gf': 10, 'ga': 3, 'pos': 1},
-            'Arsenal': {'tier': 1, 'points': 12, 'gf': 9, 'ga': 4, 'pos': 2},
-            'Liverpool': {'tier': 1, 'points': 12, 'gf': 9, 'ga': 4, 'pos': 3},
-            'Chelsea': {'tier': 1, 'points': 11, 'gf': 8, 'ga': 5, 'pos': 4},
-            'Manchester United': {'tier': 1, 'points': 10, 'gf': 7, 'ga': 5, 'pos': 5},
-            'Tottenham': {'tier': 1, 'points': 10, 'gf': 8, 'ga': 6, 'pos': 6},
-            
-            # European contenders
-            'Newcastle': {'tier': 2, 'points': 9, 'gf': 7, 'ga': 6, 'pos': 7},
-            'Brighton': {'tier': 2, 'points': 8, 'gf': 6, 'ga': 6, 'pos': 8},
-            'West Ham': {'tier': 2, 'points': 8, 'gf': 6, 'ga': 7, 'pos': 9},
-            'Aston Villa': {'tier': 2, 'points': 7, 'gf': 6, 'ga': 7, 'pos': 10},
-            
-            # Mid-table
-            'Crystal Palace': {'tier': 3, 'points': 6, 'gf': 5, 'ga': 7, 'pos': 11},
-            'Fulham': {'tier': 3, 'points': 6, 'gf': 5, 'ga': 7, 'pos': 12},
-            'Brentford': {'tier': 3, 'points': 5, 'gf': 4, 'ga': 7, 'pos': 13},
-            'Wolves': {'tier': 3, 'points': 5, 'gf': 4, 'ga': 8, 'pos': 14},
-            
-            # Lower table
-            'Everton': {'tier': 4, 'points': 4, 'gf': 4, 'ga': 8, 'pos': 15},
-            'Burnley': {'tier': 4, 'points': 3, 'gf': 3, 'ga': 9, 'pos': 16},
-            'Sheffield Utd': {'tier': 4, 'points': 2, 'gf': 2, 'ga': 10, 'pos': 17},
-            'Luton': {'tier': 4, 'points': 2, 'gf': 3, 'ga': 10, 'pos': 18},
-        }
-        
-        team_data = premier_league_teams.get(team_name)
-        if team_data:
-            return {
-                'points_last5': team_data['points'],
-                'goals_scored_last5': team_data['gf'],
-                'goals_conceded_last5': team_data['ga'],
-                'league_position': team_data['pos']
-            }
-        
-        # Default for unknown teams
-        return {
-            'points_last5': 6,
-            'goals_scored_last5': 5,
-            'goals_conceded_last5': 6,
-            'league_position': 15
-        }
-    
-    def scrape_complete_enhanced_dataset(self, max_matches=30):
-        """Scrape enhanced dataset with better data accuracy"""
-        logger.info("Starting enhanced dataset scraping")
-        
-        all_matches = []
-        
-        # Enhanced ESPN scraping
-        espn_matches = self.scrape_espn_enhanced()
-        all_matches.extend(espn_matches)
-        
-        # Remove duplicates more intelligently
-        unique_matches = self.deduplicate_matches(all_matches)
-        logger.info(f"Found {len(unique_matches)} unique matches after deduplication")
-        
-        # Process matches with enhanced data
-        complete_data = []
-        
-        for i, match in enumerate(unique_matches[:max_matches]):
-            try:
-                logger.info(f"Processing match {i+1}/{min(len(unique_matches), max_matches)}: {match['home_team']} vs {match['away_team']}")
-                
-                # Get enhanced team stats
-                home_stats = self.get_team_stats_enhanced(match['home_team'])
-                away_stats = self.get_team_stats_enhanced(match['away_team'])
-                
-                # Create comprehensive match data
-                match_data = {
-                    'match_id': f"{match['home_team']}_vs_{match['away_team']}_{match['date'].strftime('%Y%m%d') if match['date'] else 'unknown'}",
-                    'match_date': match['date'],
-                    'home_team': match['home_team'],
-                    'away_team': match['away_team'],
-                    'final_score': match.get('score'),
-                    'match_status': match.get('status', 'unknown'),
-                    
-                    # Enhanced team statistics
-                    'home_points_last5': home_stats.get('points_last5', 0),
-                    'home_goals_scored_last5': home_stats.get('goals_scored_last5', 0),
-                    'home_goals_conceded_last5': home_stats.get('goals_conceded_last5', 0),
-                    'home_league_position': home_stats.get('league_position'),
-                    
-                    'away_points_last5': away_stats.get('points_last5', 0),
-                    'away_goals_scored_last5': away_stats.get('goals_scored_last5', 0),
-                    'away_goals_conceded_last5': away_stats.get('goals_conceded_last5', 0),
-                    'away_league_position': away_stats.get('league_position'),
-                    
-                    # Calculated metrics
-                    'home_form': self.calculate_form_rating(home_stats.get('points_last5', 0)),
-                    'away_form': self.calculate_form_rating(away_stats.get('points_last5', 0)),
-                    'goal_difference_home': home_stats.get('goals_scored_last5', 0) - home_stats.get('goals_conceded_last5', 0),
-                    'goal_difference_away': away_stats.get('goals_scored_last5', 0) - away_stats.get('goals_conceded_last5', 0),
-                    
-                    # Match context
-                    'is_completed': match.get('score') is not None,
-                    'data_source': match['source'],
-                    'scraping_timestamp': datetime.now().isoformat(),
-                }
-                
-                complete_data.append(match_data)
-                logger.info(f"Successfully processed match {i+1}")
-                
-            except Exception as e:
-                logger.error(f"Error processing match {i+1}: {e}")
-                continue
-        
-        if complete_data:
-            df = pd.DataFrame(complete_data)
-            logger.info(f"Created enhanced DataFrame with {len(df)} matches and {len(df.columns)} columns")
-            return df
-        else:
-            logger.error("No enhanced match data created")
-            return pd.DataFrame()
-    
-    def deduplicate_matches(self, matches):
-        """Intelligent match deduplication"""
-        seen = {}
-        unique_matches = []
-        
-        for match in matches:
-            if not match.get('home_team') or not match.get('away_team'):
-                continue
-                
-            # Create key for deduplication
-            date_key = match['date'].date() if match.get('date') else 'no_date'
-            key = (match['home_team'], match['away_team'], date_key)
-            
-            # Keep match with score if available, or first one found
-            if key not in seen:
-                seen[key] = match
-                unique_matches.append(match)
-            elif match.get('score') and not seen[key].get('score'):
-                # Replace with match that has score
-                seen[key] = match
-                # Update in unique_matches
-                for i, existing_match in enumerate(unique_matches):
-                    existing_date = existing_match['date'].date() if existing_match.get('date') else 'no_date'
-                    existing_key = (existing_match['home_team'], existing_match['away_team'], existing_date)
-                    if existing_key == key:
-                        unique_matches[i] = match
-                        break
-        
-        return unique_matches
-    
-    def calculate_form_rating(self, points_last5):
-        """Calculate form rating based on recent points"""
-        if points_last5 >= 12:
-            return 'Excellent'
-        elif points_last5 >= 9:
-            return 'Good'
-        elif points_last5 >= 6:
-            return 'Average'
-        elif points_last5 >= 3:
-            return 'Poor'
-        else:
-            return 'Very Poor'
-    
-    def save_to_excel_enhanced(self, df, filename='enhanced_football_matches.xlsx'):
-        """Save enhanced DataFrame to Excel with better formatting"""
-        if df.empty:
-            logger.warning("No data to save")
-            return None
-        
-        logger.info(f"Saving {len(df)} matches to enhanced Excel: {filename}")
-        
-        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-            # Main matches sheet
-            df.to_excel(writer, sheet_name='Matches', index=False)
-            
-            workbook = writer.book
-            worksheet = writer.sheets['Matches']
-            
-            # Enhanced styling
-            header_fill = PatternFill(start_color='1f4e79', end_color='1f4e79', fill_type='solid')
-            header_font = Font(color='FFFFFF', bold=True)
-            border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                          top=Side(style='thin'), bottom=Side(style='thin'))
-            
-            # Style headers
-            for cell in worksheet[1]:
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = Alignment(horizontal='center', wrap_text=True)
-                cell.border = border
-            
-            # Auto-adjust column widths and apply borders
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                
-                for cell in column:
-                    cell.border = border
+            # Extract scores - try multiple approaches
+            def get_score(competitor):
+                # Try direct score field
+                score = competitor.get('score')
+                if score is not None:
                     try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
+                        return int(score)
+                    except (ValueError, TypeError):
                         pass
                 
-                adjusted_width = min(max_length + 3, 25)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
+                # Try nested score structures
+                score_obj = competitor.get('score', {})
+                if isinstance(score_obj, dict):
+                    display_value = score_obj.get('displayValue', score_obj.get('value', '0'))
+                    try:
+                        return int(display_value)
+                    except (ValueError, TypeError):
+                        pass
+                
+                return 0
             
-            # Create summary sheets
-            self.create_summary_sheets(writer, df)
-        
-        logger.info(f"Enhanced Excel file saved: {filename}")
-        return filename
+            match_data['home_goals'] = get_score(home_team)
+            match_data['away_goals'] = get_score(away_team)
+            
+            # Derive result
+            if match_data['home_goals'] > match_data['away_goals']:
+                match_data['result'] = 'H'
+            elif match_data['away_goals'] > match_data['home_goals']:
+                match_data['result'] = 'A'
+            else:
+                match_data['result'] = 'D'
+            
+            self.logger.debug(f"Successfully parsed: {match_data['home_team']} {match_data['home_goals']}-{match_data['away_goals']} {match_data['away_team']}")
+            return match_data
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing match data: {e}")
+            if self.debug_mode:
+                import traceback
+                self.logger.error(f"Full traceback: {traceback.format_exc()}")
+            return None
     
-    def create_summary_sheets(self, writer, df):
-        """Create additional summary sheets"""
-        # Data sources summary
-        if 'data_source' in df.columns:
-            source_summary = df['data_source'].value_counts().reset_index()
-            source_summary.columns = ['Data Source', 'Match Count']
-            source_summary.to_excel(writer, sheet_name='Data_Sources', index=False)
+    def scrape_season_matches(self, league_code: str, season_year: int) -> pd.DataFrame:
+        """
+        Scrape all matches for a given league and season using ESPN API
         
-        # Team statistics summary
-        home_stats = df.groupby('home_team').agg({
-            'home_points_last5': 'first',
-            'home_goals_scored_last5': 'first',
-            'home_goals_conceded_last5': 'first',
-            'home_league_position': 'first'
-        }).reset_index()
+        Args:
+            league_code: ESPN league code (e.g., 'eng.1' for Premier League)
+            season_year: Year the season started (e.g., 2023 for 2023-24 season)
+            
+        Returns:
+            DataFrame with match data
+        """
+        all_matches = []
+        dates = self.generate_season_dates(season_year)
         
-        home_stats.columns = ['Team', 'Points_Last5', 'Goals_Scored', 'Goals_Conceded', 'League_Position']
-        home_stats.to_excel(writer, sheet_name='Team_Stats', index=False)
+        self.logger.info(f"Starting to scrape {league_code.upper()} {season_year}-{season_year+1} season")
+        self.logger.info(f"Checking {len(dates)} dates from {dates[0]} to {dates[-1]}")
         
-        # Match status summary
-        if 'match_status' in df.columns:
-            status_summary = df['match_status'].value_counts().reset_index()
-            status_summary.columns = ['Match Status', 'Count']
-            status_summary.to_excel(writer, sheet_name='Match_Status', index=False)
+        matches_found_count = 0
+        
+        for date_str in dates:
+            # Construct API URL
+            api_url = f"{self.api_base}/{league_code}/scoreboard"
+            params = {'dates': date_str}
+            
+            # Add parameters to URL
+            url_with_params = f"{api_url}?dates={date_str}"
+            
+            api_data = self.get_api_data(url_with_params)
+            if not api_data:
+                continue
+            
+            # Parse events from API response
+            events = api_data.get('events', [])
+            
+            if events:
+                self.logger.info(f"Found {len(events)} matches on {date_str}")
+                matches_found_count += len(events)
+                
+                for event in events:
+                    match_data = self.parse_match_from_api(event)
+                    if match_data:
+                        all_matches.append(match_data)
+        
+        self.logger.info(f"Total matches found: {matches_found_count}")
+        self.logger.info(f"Successfully parsed: {len(all_matches)} finished matches")
+        
+        if not all_matches:
+            self.logger.warning("No matches were scraped from the API")
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(all_matches)
+        
+        # Clean and sort data
+        if not df.empty:
+            # Remove duplicates based on date and teams
+            df = df.drop_duplicates(subset=['date', 'home_team', 'away_team'])
+            
+            # Sort by date
+            df = df.sort_values('date')
+            
+            # Reset index
+            df = df.reset_index(drop=True)
+            
+            # Convert date to string for better Excel compatibility
+            df['date'] = df['date'].astype(str)
+        
+        return df
+    
+    def get_league_info(self, league_code: str) -> Dict:
+        """
+        Get league information from ESPN API
+        
+        Args:
+            league_code: ESPN league code
+            
+        Returns:
+            Dictionary with league information
+        """
+        api_url = f"{self.api_base}/{league_code}/scoreboard"
+        data = self.get_api_data(api_url)
+        
+        if data and 'leagues' in data:
+            league_info = data['leagues'][0]
+            return {
+                'name': league_info.get('name', 'Unknown League'),
+                'abbreviation': league_info.get('abbreviation', league_code.upper()),
+                'season': league_info.get('season', {}).get('displayName', 'Unknown Season')
+            }
+        
+        return {'name': 'Unknown League', 'abbreviation': league_code.upper(), 'season': 'Unknown Season'}
+    
+    def save_to_excel(self, df: pd.DataFrame, filename: str = "espn_historical_matches.xlsx"):
+        """
+        Save DataFrame to Excel file
+        
+        Args:
+            df: DataFrame to save
+            filename: Output filename
+        """
+        try:
+            df.to_excel(filename, index=False, engine='openpyxl')
+            self.logger.info(f"Data saved to {filename}")
+        except Exception as e:
+            self.logger.error(f"Error saving to Excel: {e}")
+            # Fallback to CSV
+            csv_filename = filename.replace('.xlsx', '.csv')
+            df.to_csv(csv_filename, index=False)
+            self.logger.info(f"Data saved to {csv_filename} instead")
 
 def main():
-    """Enhanced main execution function"""
-    logger.info("Starting Enhanced Football Scraper")
+    """
+    Main function to run the scraper
+    """
+    # Initialize scraper with debug mode enabled to see what's happening
+    scraper = ESPNFootballScraper(delay=1.0, debug_mode=True)
     
-    scraper = EnhancedFootballScraper(delay=4)
+    # Define league code and season - focusing on 2024 season
+    league_code = "eng.1"  # Premier League
+    season_year = 2023  # 2023-24 season (since you want complete 2024 data)
     
-    try:
-        # Scrape enhanced dataset
-        df = scraper.scrape_complete_enhanced_dataset(max_matches=30)
+    print(f"🏈 ESPN Football Match Scraper - API Version")
+    print(f"📊 Scraping {league_code.upper()} {season_year}-{season_year+1} season")
+    print("=" * 60)
+    
+    # Get league info
+    league_info = scraper.get_league_info(league_code)
+    print(f"🏆 League: {league_info['name']}")
+    print("=" * 60)
+    
+    # Scrape matches
+    matches_df = scraper.scrape_season_matches(league_code, season_year)
+    
+    if not matches_df.empty:
+        # Display first 5 rows
+        print(f"\n📋 First 5 rows of scraped data:")
+        print(matches_df.head())
+        
+        # Display summary statistics
+        print(f"\n📈 Dataset Summary:")
+        print(f"Total matches: {len(matches_df)}")
+        print(f"Date range: {matches_df['date'].min()} to {matches_df['date'].max()}")
+        
+        # Results breakdown
+        result_counts = matches_df['result'].value_counts()
+        print(f"Home wins (H): {result_counts.get('H', 0)}")
+        print(f"Away wins (A): {result_counts.get('A', 0)}")
+        print(f"Draws (D): {result_counts.get('D', 0)}")
+        
+        # Teams involved
+        all_teams = set(matches_df['home_team'].tolist() + matches_df['away_team'].tolist())
+        print(f"Teams involved: {len(all_teams)}")
+        print(f"Sample teams: {list(all_teams)[:5]}")
+        
+        # Average goals per match
+        avg_goals = (matches_df['home_goals'] + matches_df['away_goals']).mean()
+        print(f"Average goals per match: {avg_goals:.2f}")
+        
+        # Save to Excel
+        filename = f"espn_{league_code}_season_{season_year}-{season_year+1}.xlsx"
+        scraper.save_to_excel(matches_df, filename)
+        print(f"\n✅ Data successfully saved to {filename}")
+        
+    else:
+        print("❌ No data was scraped. Check the debug logs above to see what's happening.")
+        print("💡 The API might be returning data in a different format than expected.")
+        
+        # Let's try to examine one API response manually
+        print("\n🔍 Attempting to fetch and examine one sample date...")
+        sample_url = f"{scraper.api_base}/{league_code}/scoreboard?dates=20231202"
+        sample_data = scraper.get_api_data(sample_url)
+        
+        if sample_data:
+            print("📝 Sample API response structure:")
+            print(f"Keys in response: {list(sample_data.keys())}")
+            
+            if 'events' in sample_data and sample_data['events']:
+                print(f"Number of events: {len(sample_data['events'])}")
+                first_event = sample_data['events'][0]
+                print(f"Keys in first event: {list(first_event.keys())}")
+                
+                if 'status' in first_event:
+                    status = first_event['status']
+                    print(f"Status structure: {status}")
+                
+                if 'competitions' in first_event and first_event['competitions']:
+                    comp = first_event['competitions'][0]
+                    if 'competitors' in comp:
+                        competitors = comp['competitors']
+                        print(f"Number of competitors: {len(competitors)}")
+                        if competitors:
+                            print(f"First competitor structure: {list(competitors[0].keys())}")
+    
+    return matches_df
+
+# Additional function to scrape multiple leagues
+def scrape_multiple_leagues(leagues: Dict[str, str], season_year: int = 2023):
+    """
+    Scrape multiple leagues for the same season
+    
+    Args:
+        leagues: Dictionary mapping league codes to league names
+        season_year: Season year to scrape
+    """
+    scraper = ESPNFootballScraper(delay=1.0)
+    all_data = {}
+    
+    for league_code, league_name in leagues.items():
+        print(f"\n🏆 Scraping {league_name} ({league_code})...")
+        df = scraper.scrape_season_matches(league_code, season_year)
         
         if not df.empty:
-            excel_filename = 'enhanced_football_matches.xlsx'
-            scraper.save_to_excel_enhanced(df, excel_filename)
-            
-            print(f"\n{'='*80}")
-            print(f"ENHANCED FOOTBALL SCRAPING COMPLETE")
-            print(f"{'='*80}")
-            print(f"📊 Total matches: {len(df)}")
-            print(f"📋 Columns: {len(df.columns)}")
-            print(f"📁 Excel file: {excel_filename}")
-            
-            print(f"\n🔍 Data sources breakdown:")
-            if 'data_source' in df.columns:
-                source_counts = df['data_source'].value_counts()
-                for source, count in source_counts.items():
-                    print(f"   • {source.upper()}: {count} matches")
-            
-            print(f"\n⚽ Sample matches with proper dates:")
-            for _, row in df.head(5).iterrows():
-                if pd.notna(row.get('match_date')):
-                    date_str = row['match_date'].strftime('%Y-%m-%d %H:%M') if hasattr(row['match_date'], 'strftime') else str(row['match_date'])
-                else:
-                    date_str = 'No date'
-                
-                score = row.get('final_score', 'No score')
-                status = row.get('match_status', 'Unknown')
-                source = row.get('data_source', 'Unknown').upper()
-                
-                print(f"   {date_str}: {row['home_team']} vs {row['away_team']}")
-                print(f"      Score: {score} | Status: {status} | Source: {source}")
-            
-            # Show team stats examples
-            print(f"\n📈 Sample team statistics:")
-            unique_teams = pd.concat([df['home_team'], df['away_team']]).unique()[:3]
-            for team in unique_teams:
-                team_data = df[df['home_team'] == team].iloc[0] if len(df[df['home_team'] == team]) > 0 else df[df['away_team'] == team].iloc[0]
-                if team == team_data.get('home_team'):
-                    points = team_data.get('home_points_last5', 'N/A')
-                    gf = team_data.get('home_goals_scored_last5', 'N/A')
-                    ga = team_data.get('home_goals_conceded_last5', 'N/A')
-                    pos = team_data.get('home_league_position', 'N/A')
-                else:
-                    points = team_data.get('away_points_last5', 'N/A')
-                    gf = team_data.get('away_goals_scored_last5', 'N/A')
-                    ga = team_data.get('away_goals_conceded_last5', 'N/A')
-                    pos = team_data.get('away_league_position', 'N/A')
-                
-                print(f"   {team}: {points} points, {gf} goals scored, {ga} conceded, Position: {pos}")
-            
-            print(f"\n✅ Enhanced features included:")
-            print(f"   • Proper match dates (not scraping dates)")
-            print(f"   • Team statistics and league positions")
-            print(f"   • Match status tracking")
-            print(f"   • Form ratings and calculated metrics")
-            print(f"   • Duplicate removal with score preference")
-            print(f"   • Multiple data source integration")
-            
+            all_data[league_name] = df
+            filename = f"espn_{league_code}_season_{season_year}-{season_year+1}.xlsx"
+            scraper.save_to_excel(df, filename)
+            print(f"✅ {league_name}: {len(df)} matches saved to {filename}")
         else:
-            logger.error("No enhanced match data found")
-            print("\n❌ No match data found. Possible reasons:")
-            print("   • Websites have changed their structure")
-            print("   • Anti-scraping measures are active")
-            print("   • Network connectivity issues")
-            print("   • Need to update selectors for current site layouts")
-            print("\nCheck the log file for detailed debugging information.")
-            
-    except Exception as e:
-        logger.error(f"Enhanced main execution error: {e}")
-        print(f"\n❌ Error occurred: {e}")
-        print("Check the log file 'football_scraper_enhanced.log' for details.")
+            print(f"❌ {league_name}: No data found")
+    
+    return all_data
 
 if __name__ == "__main__":
-    main()
+    # Run the scraper for Premier League 2023-24 season
+    dataset = main()
+    
+    # Optional: Uncomment to scrape multiple leagues
+    """
+    # Major European leagues
+    leagues = {
+        'eng.1': 'Premier League',
+        'esp.1': 'La Liga',
+        'ger.1': 'Bundesliga',
+        'ita.1': 'Serie A',
+        'fra.1': 'Ligue 1'
+    }
+    
+    print("\n" + "="*60)
+    print("🌍 SCRAPING MULTIPLE LEAGUES")
+    print("="*60)
+    
+    all_leagues_data = scrape_multiple_leagues(leagues, 2023)
+    """
+    
+    print("\n🔧 Script completed. Dataset is available in the 'dataset' variable.")
