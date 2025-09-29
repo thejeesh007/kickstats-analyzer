@@ -13,103 +13,217 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+from datetime import datetime
+import random
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class EnhancedESPNPlayerScraper:
-    def __init__(self, use_selenium=False, max_workers=3):
+class TransfermarktGlobalScraper:
+    def __init__(self, use_selenium=False, max_workers=5):
         """
-        Enhanced ESPN Player Scraper for getting 200+ players
+        Comprehensive Transfermarkt scraper for global player data
         
         Args:
-            use_selenium (bool): Whether to use Selenium for dynamic content
-            max_workers (int): Number of concurrent threads for scraping
+            use_selenium (bool): Whether to use Selenium
+            max_workers (int): Number of concurrent threads
         """
-        self.base_url = "https://www.espn.com"
+        self.base_url = "https://www.transfermarkt.com"
         self.use_selenium = use_selenium
         self.max_workers = max_workers
         self.session = requests.Session()
         self.driver = None
         
-        # Headers to mimic a real browser
+        # Headers to avoid blocking
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-GB,en;q=0.9,en-US;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
             'Sec-Fetch-Dest': 'document',
             'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
         }
         self.session.headers.update(self.headers)
         
-        # Major leagues and their team IDs for comprehensive scraping
-        self.major_leagues = {
-            'Premier League': {
-                'league_code': 'ENG.1',
-                'teams': [
-                    {'id': 359, 'name': 'Liverpool'},
-                    {'id': 382, 'name': 'Manchester City'},
-                    {'id': 361, 'name': 'Manchester United'},
-                    {'id': 363, 'name': 'Arsenal'},
-                    {'id': 367, 'name': 'Chelsea'},
-                    {'id': 368, 'name': 'Tottenham'},
-                    {'id': 377, 'name': 'Newcastle'},
-                    {'id': 356, 'name': 'Aston Villa'},
-                    {'id': 384, 'name': 'Brighton'},
-                    {'id': 381, 'name': 'West Ham'}
+        # Global leagues and competitions from all continents
+        self.global_competitions = {
+            'Europe': {
+                'England': [
+                    {'name': 'Premier League', 'id': 'GB1', 'tier': 1},
+                    {'name': 'Championship', 'id': 'GB2', 'tier': 2},
+                    {'name': 'League One', 'id': 'GB3', 'tier': 3},
+                    {'name': 'League Two', 'id': 'GB4', 'tier': 4}
+                ],
+                'Spain': [
+                    {'name': 'La Liga', 'id': 'ES1', 'tier': 1},
+                    {'name': 'La Liga 2', 'id': 'ES2', 'tier': 2},
+                    {'name': 'Primera RFEF', 'id': 'ES3G1', 'tier': 3}
+                ],
+                'Germany': [
+                    {'name': 'Bundesliga', 'id': 'L1', 'tier': 1},
+                    {'name': '2. Bundesliga', 'id': 'L2', 'tier': 2},
+                    {'name': '3. Liga', 'id': 'L3', 'tier': 3}
+                ],
+                'Italy': [
+                    {'name': 'Serie A', 'id': 'IT1', 'tier': 1},
+                    {'name': 'Serie B', 'id': 'IT2', 'tier': 2},
+                    {'name': 'Serie C', 'id': 'IT3A', 'tier': 3}
+                ],
+                'France': [
+                    {'name': 'Ligue 1', 'id': 'FR1', 'tier': 1},
+                    {'name': 'Ligue 2', 'id': 'FR2', 'tier': 2},
+                    {'name': 'National', 'id': 'FR3', 'tier': 3}
+                ],
+                'Netherlands': [
+                    {'name': 'Eredivisie', 'id': 'NL1', 'tier': 1},
+                    {'name': 'Eerste Divisie', 'id': 'NL2', 'tier': 2}
+                ],
+                'Portugal': [
+                    {'name': 'Liga Portugal', 'id': 'PO1', 'tier': 1},
+                    {'name': 'Liga Portugal 2', 'id': 'PO2', 'tier': 2}
+                ],
+                'Belgium': [
+                    {'name': 'Jupiler Pro League', 'id': 'BE1', 'tier': 1}
+                ],
+                'Turkey': [
+                    {'name': 'Süper Lig', 'id': 'TR1', 'tier': 1}
+                ],
+                'Russia': [
+                    {'name': 'Premier Liga', 'id': 'RU1', 'tier': 1}
+                ],
+                'Ukraine': [
+                    {'name': 'Premier League', 'id': 'UKR1', 'tier': 1}
+                ],
+                'Greece': [
+                    {'name': 'Super League 1', 'id': 'GR1', 'tier': 1}
+                ],
+                'Switzerland': [
+                    {'name': 'Super League', 'id': 'C1', 'tier': 1}
+                ],
+                'Austria': [
+                    {'name': 'Bundesliga', 'id': 'A1', 'tier': 1}
+                ],
+                'Scotland': [
+                    {'name': 'Premiership', 'id': 'SC1', 'tier': 1}
+                ],
+                'Denmark': [
+                    {'name': 'Superligaen', 'id': 'DK1', 'tier': 1}
+                ],
+                'Sweden': [
+                    {'name': 'Allsvenskan', 'id': 'SE1', 'tier': 1}
+                ],
+                'Norway': [
+                    {'name': 'Eliteserien', 'id': 'NO1', 'tier': 1}
                 ]
             },
-            'La Liga': {
-                'league_code': 'ESP.1',
-                'teams': [
-                    {'id': 86, 'name': 'Real Madrid'},
-                    {'id': 83, 'name': 'Barcelona'},
-                    {'id': 95, 'name': 'Atletico Madrid'},
-                    {'id': 244, 'name': 'Sevilla'},
-                    {'id': 94, 'name': 'Valencia'},
-                    {'id': 88, 'name': 'Real Sociedad'},
-                    {'id': 92, 'name': 'Real Betis'},
-                    {'id': 93, 'name': 'Villarreal'}
+            'South America': {
+                'Brazil': [
+                    {'name': 'Série A', 'id': 'BRA1', 'tier': 1},
+                    {'name': 'Série B', 'id': 'BRA2', 'tier': 2}
+                ],
+                'Argentina': [
+                    {'name': 'Liga Profesional', 'id': 'AR1N', 'tier': 1}
+                ],
+                'Colombia': [
+                    {'name': 'Primera A', 'id': 'KO1', 'tier': 1}
+                ],
+                'Chile': [
+                    {'name': 'Primera División', 'id': 'CHIL', 'tier': 1}
+                ],
+                'Uruguay': [
+                    {'name': 'Primera División', 'id': 'URU1', 'tier': 1}
+                ],
+                'Paraguay': [
+                    {'name': 'Primera División', 'id': 'PAR1', 'tier': 1}
+                ],
+                'Peru': [
+                    {'name': 'Liga 1', 'id': 'PER1', 'tier': 1}
+                ],
+                'Ecuador': [
+                    {'name': 'Liga Pro', 'id': 'EC1', 'tier': 1}
+                ],
+                'Venezuela': [
+                    {'name': 'Primera División', 'id': 'VEN1', 'tier': 1}
+                ],
+                'Bolivia': [
+                    {'name': 'División Profesional', 'id': 'BOL1', 'tier': 1}
                 ]
             },
-            'Serie A': {
-                'league_code': 'ITA.1',
-                'teams': [
-                    {'id': 105, 'name': 'Juventus'},
-                    {'id': 103, 'name': 'Inter Milan'},
-                    {'id': 104, 'name': 'AC Milan'},
-                    {'id': 113, 'name': 'AS Roma'},
-                    {'id': 112, 'name': 'Napoli'},
-                    {'id': 108, 'name': 'Lazio'},
-                    {'id': 107, 'name': 'Atalanta'},
-                    {'id': 115, 'name': 'Fiorentina'}
+            'North America': {
+                'United States': [
+                    {'name': 'MLS', 'id': 'MLS1', 'tier': 1},
+                    {'name': 'USL Championship', 'id': 'USLC', 'tier': 2}
+                ],
+                'Mexico': [
+                    {'name': 'Liga MX', 'id': 'MX1', 'tier': 1},
+                    {'name': 'Liga de Expansión MX', 'id': 'MXEX', 'tier': 2}
+                ],
+                'Canada': [
+                    {'name': 'Canadian Premier League', 'id': 'CANPL', 'tier': 1}
                 ]
             },
-            'Bundesliga': {
-                'league_code': 'GER.1',
-                'teams': [
-                    {'id': 132, 'name': 'Bayern Munich'},
-                    {'id': 124, 'name': 'Borussia Dortmund'},
-                    {'id': 125, 'name': 'RB Leipzig'},
-                    {'id': 131, 'name': 'Bayer Leverkusen'},
-                    {'id': 122, 'name': 'Borussia Monchengladbach'},
-                    {'id': 126, 'name': 'Eintracht Frankfurt'}
+            'Asia': {
+                'Japan': [
+                    {'name': 'J1 League', 'id': 'JAP1', 'tier': 1},
+                    {'name': 'J2 League', 'id': 'JAP2', 'tier': 2}
+                ],
+                'South Korea': [
+                    {'name': 'K League 1', 'id': 'KOR1', 'tier': 1}
+                ],
+                'China': [
+                    {'name': 'Super League', 'id': 'CSL', 'tier': 1}
+                ],
+                'Saudi Arabia': [
+                    {'name': 'Saudi Pro League', 'id': 'SA1', 'tier': 1}
+                ],
+                'UAE': [
+                    {'name': 'Arabian Gulf League', 'id': 'VAE1', 'tier': 1}
+                ],
+                'Qatar': [
+                    {'name': 'Stars League', 'id': 'QAT1', 'tier': 1}
+                ],
+                'India': [
+                    {'name': 'Indian Super League', 'id': 'IND1', 'tier': 1}
+                ],
+                'Australia': [
+                    {'name': 'A-League Men', 'id': 'AUS1', 'tier': 1}
+                ],
+                'Thailand': [
+                    {'name': 'Thai League 1', 'id': 'THA1', 'tier': 1}
+                ],
+                'Iran': [
+                    {'name': 'Persian Gulf Pro League', 'id': 'IR1', 'tier': 1}
                 ]
             },
-            'MLS': {
-                'league_code': 'USA.1',
-                'teams': [
-                    {'id': 1996, 'name': 'Inter Miami'},
-                    {'id': 347, 'name': 'LA Galaxy'},
-                    {'id': 345, 'name': 'LAFC'},
-                    {'id': 341, 'name': 'New York City FC'},
-                    {'id': 2255, 'name': 'Atlanta United'},
-                    {'id': 399, 'name': 'Portland Timbers'}
+            'Africa': {
+                'South Africa': [
+                    {'name': 'Premiership', 'id': 'RSA1', 'tier': 1}
+                ],
+                'Egypt': [
+                    {'name': 'Premier League', 'id': 'EGY1', 'tier': 1}
+                ],
+                'Morocco': [
+                    {'name': 'Botola Pro', 'id': 'MAR1', 'tier': 1}
+                ],
+                'Nigeria': [
+                    {'name': 'Professional Football League', 'id': 'NIG1', 'tier': 1}
+                ],
+                'Tunisia': [
+                    {'name': 'Ligue Professionnelle 1', 'id': 'TUN1', 'tier': 1}
+                ],
+                'Algeria': [
+                    {'name': 'Ligue Professionnelle 1', 'id': 'DZ1', 'tier': 1}
+                ],
+                'Ghana': [
+                    {'name': 'Premier League', 'id': 'GHA1', 'tier': 1}
+                ],
+                'Senegal': [
+                    {'name': 'Ligue 1', 'id': 'SEN1', 'tier': 1}
                 ]
             }
         }
@@ -118,7 +232,7 @@ class EnhancedESPNPlayerScraper:
             self._setup_selenium()
     
     def _setup_selenium(self):
-        """Setup Selenium WebDriver with better options"""
+        """Setup Selenium WebDriver for Transfermarkt"""
         try:
             chrome_options = Options()
             chrome_options.add_argument('--headless')
@@ -130,99 +244,130 @@ class EnhancedESPNPlayerScraper:
             chrome_options.add_argument(f'user-agent={self.headers["User-Agent"]}')
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
+            chrome_options.add_argument('--disable-web-security')
+            chrome_options.add_argument('--allow-running-insecure-content')
             
             self.driver = webdriver.Chrome(options=chrome_options)
             self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            logger.info("Selenium WebDriver initialized successfully")
+            logger.info("Selenium WebDriver initialized for Transfermarkt")
         except Exception as e:
             logger.error(f"Failed to initialize Selenium: {e}")
             self.use_selenium = False
     
-    def get_page_content(self, url, timeout=15):
-        """Enhanced page content retrieval with better error handling"""
+    def get_page_content(self, url, timeout=20):
+        """Enhanced page content retrieval with anti-detection measures"""
         max_retries = 3
+        
         for attempt in range(max_retries):
-            if self.use_selenium and self.driver:
-                try:
+            try:
+                if self.use_selenium and self.driver:
                     self.driver.get(url)
+                    
+                    # Wait for content to load
                     WebDriverWait(self.driver, timeout).until(
                         EC.presence_of_element_located((By.TAG_NAME, "body"))
                     )
-                    time.sleep(2)  # Allow dynamic content to load
+                    
+                    # Additional wait for dynamic content
+                    time.sleep(random.uniform(2, 4))
+                    
                     html_content = self.driver.page_source
                     return BeautifulSoup(html_content, 'html.parser')
-                except Exception as e:
-                    logger.warning(f"Selenium attempt {attempt + 1} failed for {url}: {e}")
-                    if attempt == max_retries - 1:
-                        return None
-                    time.sleep(2)
-            else:
-                try:
+                else:
+                    # Add random delay to avoid rate limiting
+                    time.sleep(random.uniform(1, 3))
+                    
                     response = self.session.get(url, timeout=timeout)
                     response.raise_for_status()
+                    
                     return BeautifulSoup(response.content, 'html.parser')
-                except Exception as e:
-                    logger.warning(f"Request attempt {attempt + 1} failed for {url}: {e}")
-                    if attempt == max_retries - 1:
-                        return None
-                    time.sleep(2)
+                    
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed for {url}: {e}")
+                if attempt == max_retries - 1:
+                    return None
+                time.sleep(random.uniform(3, 6))
+        
         return None
     
-    def get_team_squad_urls(self):
-        """Generate team squad URLs for major leagues"""
-        squad_urls = []
-        current_season = '2025'
+    def get_competition_teams(self, competition_id):
+        """Get all teams from a specific competition"""
+        url = f"{self.base_url}/startseite/wettbewerb/{competition_id}"
         
-        for league_name, league_data in self.major_leagues.items():
-            league_code = league_data['league_code']
-            
-            for team in league_data['teams']:
-                team_id = team['id']
-                team_name = team['name'].lower().replace(' ', '-')
-                
-                # Generate squad URL
-                squad_url = f"{self.base_url}/soccer/team/squad/_/id/{team_id}/league/{league_code}/season/{current_season}"
-                squad_urls.append({
-                    'url': squad_url,
-                    'team': team['name'],
-                    'league': league_name
-                })
-        
-        logger.info(f"Generated {len(squad_urls)} team squad URLs")
-        return squad_urls
-    
-    def extract_players_from_squad_page(self, squad_info):
-        """Extract all players from a team squad page"""
-        url = squad_info['url']
-        team_name = squad_info['team']
-        league = squad_info['league']
-        
-        logger.info(f"Extracting players from {team_name} ({league})")
+        logger.info(f"Getting teams from competition: {competition_id}")
         soup = self.get_page_content(url)
         
         if not soup:
-            logger.error(f"Failed to get squad page: {url}")
+            return []
+        
+        teams = []
+        
+        # Look for team links in the competition table
+        team_selectors = [
+            'a[href*="/startseite/verein/"]',
+            '.vereinsname a',
+            '.hauptlink a[href*="/verein/"]',
+            'table.items tbody tr td.hauptlink a'
+        ]
+        
+        for selector in team_selectors:
+            team_links = soup.select(selector)
+            for link in team_links:
+                if '/verein/' in link.get('href', ''):
+                    team_name = link.get_text(strip=True)
+                    team_id = re.search(r'/verein/(\d+)', link['href'])
+                    
+                    if team_id and team_name:
+                        teams.append({
+                            'name': team_name,
+                            'id': team_id.group(1),
+                            'url': urljoin(self.base_url, link['href'])
+                        })
+        
+        # Remove duplicates
+        unique_teams = []
+        seen_ids = set()
+        for team in teams:
+            if team['id'] not in seen_ids:
+                unique_teams.append(team)
+                seen_ids.add(team['id'])
+        
+        logger.info(f"Found {len(unique_teams)} teams in competition {competition_id}")
+        return unique_teams
+    
+    def get_team_squad(self, team_info, season='2024'):
+        """Get all players from a team's squad"""
+        team_id = team_info['id']
+        team_name = team_info['name']
+        
+        # Transfermarkt squad URL format
+        squad_url = f"{self.base_url}/startseite/verein/{team_id}/saison_id/{season}"
+        
+        logger.info(f"Getting squad for {team_name} (ID: {team_id})")
+        soup = self.get_page_content(squad_url)
+        
+        if not soup:
+            logger.error(f"Failed to get squad page for {team_name}")
             return []
         
         players = []
         
-        # Look for different table structures ESPN uses
-        table_selectors = [
-            'table.Table',
-            '.Table__tbody',
-            'table tbody',
-            '.squad-table tbody'
+        # Look for player table - Transfermarkt uses specific classes
+        player_table_selectors = [
+            'table.items tbody',
+            '.responsive-table tbody',
+            'div.box table tbody'
         ]
         
         table_body = None
-        for selector in table_selectors:
+        for selector in player_table_selectors:
             table_body = soup.select_one(selector)
             if table_body:
                 break
         
         if not table_body:
-            # Try alternative approach - look for player rows
-            player_rows = soup.select('tr.Table__TR, tr[data-player-id], .player-row')
+            # Alternative approach - look for player rows directly
+            player_rows = soup.select('tr.odd, tr.even')
             if player_rows:
                 table_body = soup.new_tag('tbody')
                 for row in player_rows:
@@ -233,88 +378,95 @@ class EnhancedESPNPlayerScraper:
             
             for row in rows:
                 try:
-                    cells = row.find_all(['td', 'th'])
-                    if len(cells) < 2:  # Skip header rows
+                    # Skip empty or header rows
+                    if not row.find('td'):
                         continue
                     
                     player_data = {
-                        'Player Name': '',
-                        'Team/Club': team_name,
-                        'League': league,
-                        'Position': '',
-                        'Jersey Number': '',
-                        'Age': '',
-                        'Height': '',
-                        'Weight': '',
+                        'Name': '',
+                        'Club': team_name,
                         'Nationality': '',
-                        'Matches Played': '',
-                        'Minutes Played': '',
                         'Goals': '',
                         'Assists': '',
-                        'Shots': '',
-                        'Shots on Target': '',
-                        'Pass Completion %': '',
-                        'Yellow Cards': '',
-                        'Red Cards': '',
-                        'Clean Sheets': '',
-                        'Saves': '',
-                        'Profile URL': '',
-                        'Date Scraped': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+                        'Position': '',
+                        'Age': '',
+                        'Market Value': '',
+                        'Contract Until': '',
+                        'Jersey Number': '',
+                        'Date Scraped': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     }
                     
-                    # Extract player name and profile link
-                    name_link = row.find('a', href=re.compile(r'/player/'))
-                    if name_link:
-                        player_data['Player Name'] = name_link.get_text(strip=True)
-                        player_data['Profile URL'] = urljoin(self.base_url, name_link['href'])
-                    else:
-                        # Try alternative selectors
-                        name_cell = cells[0] if cells else None
-                        if name_cell:
-                            player_data['Player Name'] = name_cell.get_text(strip=True)
+                    cells = row.find_all('td')
+                    if len(cells) < 3:
+                        continue
                     
-                    # Extract jersey number (usually first or second cell)
-                    for cell in cells[:3]:
-                        text = cell.get_text(strip=True)
-                        if text.isdigit() and len(text) <= 3:
-                            player_data['Jersey Number'] = text
-                            break
+                    # Extract player name (usually in a link)
+                    name_link = row.find('a', href=re.compile(r'/profil/spieler/'))
+                    if name_link:
+                        player_data['Name'] = name_link.get_text(strip=True)
+                    else:
+                        # Alternative: look for player name in cells
+                        for cell in cells[:5]:
+                            cell_text = cell.get_text(strip=True)
+                            if len(cell_text) > 3 and not cell_text.isdigit():
+                                if not any(char in cell_text for char in ['€', '$', '%', '.']):
+                                    player_data['Name'] = cell_text
+                                    break
+                    
+                    # Extract nationality (look for flag images or country codes)
+                    flag_imgs = row.find_all('img', src=re.compile(r'flagge'))
+                    if flag_imgs:
+                        nationalities = []
+                        for img in flag_imgs:
+                            title = img.get('title', '')
+                            alt = img.get('alt', '')
+                            nationality = title or alt
+                            if nationality and nationality not in nationalities:
+                                nationalities.append(nationality)
+                        player_data['Nationality'] = ', '.join(nationalities)
                     
                     # Extract position
-                    position_patterns = ['GK', 'DEF', 'MID', 'FWD', 'F', 'M', 'D', 'G', 
-                                       'Goalkeeper', 'Defender', 'Midfielder', 'Forward']
-                    
-                    for cell in cells:
-                        cell_text = cell.get_text(strip=True)
-                        for pattern in position_patterns:
-                            if pattern.upper() in cell_text.upper():
+                    position_cell = row.find('td', text=re.compile(r'^(GK|DEF|MID|ATT|FW|CB|LB|RB|CM|CAM|CDM|LM|RM|LW|RW|ST|CF)'))
+                    if position_cell:
+                        player_data['Position'] = position_cell.get_text(strip=True)
+                    else:
+                        # Look for position in any cell
+                        for cell in cells:
+                            cell_text = cell.get_text(strip=True)
+                            if re.match(r'^(GK|DEF|MID|ATT|FW|CB|LB|RB|CM|CAM|CDM|LM|RM|LW|RW|ST|CF|Goalkeeper|Defender|Midfielder|Forward|Attack)$', cell_text, re.IGNORECASE):
                                 player_data['Position'] = cell_text
                                 break
-                        if player_data['Position']:
+                    
+                    # Extract age (look for numbers that could be age)
+                    for cell in cells:
+                        cell_text = cell.get_text(strip=True)
+                        if re.match(r'^\d{2}$', cell_text):  # Two digit number
+                            age = int(cell_text)
+                            if 16 <= age <= 45:  # Reasonable age range
+                                player_data['Age'] = cell_text
+                                break
+                    
+                    # Extract market value (look for € symbol)
+                    for cell in cells:
+                        cell_text = cell.get_text(strip=True)
+                        if '€' in cell_text and any(char.isdigit() for char in cell_text):
+                            player_data['Market Value'] = cell_text
                             break
                     
-                    # Extract statistics from cells
-                    cell_texts = [cell.get_text(strip=True) for cell in cells]
-                    
-                    # Look for numeric values that could be stats
-                    numeric_values = []
-                    for text in cell_texts:
-                        if re.match(r'^\d+$', text):
-                            numeric_values.append(text)
-                    
-                    # Assign numeric values to common stats (heuristic approach)
-                    if len(numeric_values) >= 3:
-                        try:
-                            # Common pattern: matches, goals, assists
-                            if len(numeric_values) >= 3:
-                                player_data['Matches Played'] = numeric_values[-3] if len(numeric_values) >= 3 else ''
-                                player_data['Goals'] = numeric_values[-2] if len(numeric_values) >= 2 else ''
-                                player_data['Assists'] = numeric_values[-1] if len(numeric_values) >= 1 else ''
-                        except:
-                            pass
+                    # Extract jersey number
+                    jersey_cell = row.find('div', class_='rn_nummer')
+                    if jersey_cell:
+                        player_data['Jersey Number'] = jersey_cell.get_text(strip=True)
+                    else:
+                        # Look for small numbers in first few cells
+                        for cell in cells[:3]:
+                            cell_text = cell.get_text(strip=True)
+                            if cell_text.isdigit() and len(cell_text) <= 2:
+                                player_data['Jersey Number'] = cell_text
+                                break
                     
                     # Only add player if we have a name
-                    if player_data['Player Name'] and len(player_data['Player Name']) > 2:
+                    if player_data['Name'] and len(player_data['Name']) > 2:
                         players.append(player_data)
                 
                 except Exception as e:
@@ -324,203 +476,197 @@ class EnhancedESPNPlayerScraper:
         logger.info(f"Extracted {len(players)} players from {team_name}")
         return players
     
-    def enhance_player_details(self, player_data):
-        """Enhance player details by visiting their profile page"""
-        if not player_data['Profile URL']:
-            return player_data
-        
-        try:
-            soup = self.get_page_content(player_data['Profile URL'])
-            if not soup:
-                return player_data
-            
-            # Extract additional details from player profile
-            # Age extraction
-            age_patterns = [
-                r'Age:?\s*(\d+)',
-                r'(\d+)\s*years?\s*old',
-                r'Born:.*?(\d+)\s*years?\s*old'
-            ]
-            
-            page_text = soup.get_text()
-            for pattern in age_patterns:
-                match = re.search(pattern, page_text, re.IGNORECASE)
-                if match:
-                    player_data['Age'] = match.group(1)
-                    break
-            
-            # Height and Weight extraction
-            bio_section = soup.find('section', class_='PlayerHeader') or soup.find('div', class_='player-bio')
-            if bio_section:
-                bio_text = bio_section.get_text()
-                
-                # Height
-                height_match = re.search(r'(\d+[\'\"]\s*\d*[\'\"]*|\d+\.\d+m|\d+cm)', bio_text)
-                if height_match:
-                    player_data['Height'] = height_match.group(1)
-                
-                # Weight
-                weight_match = re.search(r'(\d+\s*lbs?|\d+\s*kg)', bio_text)
-                if weight_match:
-                    player_data['Weight'] = weight_match.group(1)
-            
-            # Enhanced statistics extraction
-            stats_section = soup.find('section', class_='PlayerStats') or soup.find('div', class_='stats')
-            if stats_section:
-                stats_text = stats_section.get_text()
-                
-                # More comprehensive stats patterns
-                enhanced_stats = {
-                    'Minutes Played': [r'minutes.*?(\d+)', r'(\d+).*?minutes'],
-                    'Shots': [r'shots.*?(\d+)', r'(\d+).*?shots'],
-                    'Shots on Target': [r'shots?\s*on\s*target.*?(\d+)', r'(\d+).*?shots?\s*on\s*target'],
-                    'Pass Completion %': [r'pass.*?completion.*?(\d+)%', r'(\d+)%.*?pass.*?completion'],
-                    'Clean Sheets': [r'clean\s*sheets.*?(\d+)', r'(\d+).*?clean\s*sheets'],
-                    'Saves': [r'saves.*?(\d+)', r'(\d+).*?saves']
-                }
-                
-                for stat_name, patterns in enhanced_stats.items():
-                    if not player_data[stat_name]:  # Only if not already populated
-                        for pattern in patterns:
-                            match = re.search(pattern, stats_text, re.IGNORECASE)
-                            if match:
-                                player_data[stat_name] = match.group(1)
-                                break
-            
-            # Nationality extraction (more comprehensive)
-            nationality_section = soup.find('div', class_='nationality') or bio_section
-            if nationality_section:
-                countries = [
-                    'Argentina', 'Brazil', 'France', 'Spain', 'Germany', 'Italy', 'England', 
-                    'Portugal', 'Netherlands', 'Belgium', 'Croatia', 'Poland', 'Mexico',
-                    'United States', 'Canada', 'Japan', 'South Korea', 'Australia', 'Colombia',
-                    'Uruguay', 'Chile', 'Peru', 'Ecuador', 'Morocco', 'Senegal', 'Nigeria',
-                    'Ghana', 'Egypt', 'Algeria', 'Turkey', 'Serbia', 'Denmark', 'Sweden',
-                    'Norway', 'Austria', 'Switzerland', 'Ukraine', 'Czech Republic', 'Hungary'
-                ]
-                
-                nationality_text = nationality_section.get_text()
-                for country in countries:
-                    if country.lower() in nationality_text.lower():
-                        player_data['Nationality'] = country
-                        break
-            
-        except Exception as e:
-            logger.warning(f"Error enhancing player details for {player_data['Player Name']}: {e}")
-        
-        return player_data
+    def get_player_stats(self, player_name, team_name):
+        """Get detailed stats for a player (goals, assists)"""
+        # This would require accessing individual player pages
+        # For now, return empty stats - can be enhanced later
+        return {
+            'Goals': '',
+            'Assists': ''
+        }
     
-    def scrape_all_players_comprehensive(self, enhance_details=True, target_count=200):
-        """
-        Comprehensive scraping to get 200+ players
+    def scrape_competition(self, continent, country, competition):
+        """Scrape all players from a single competition"""
+        comp_name = competition['name']
+        comp_id = competition['id']
         
-        Args:
-            enhance_details (bool): Whether to visit individual player profiles
-            target_count (int): Target number of players to scrape
-            
-        Returns:
-            pandas.DataFrame: Comprehensive player data
-        """
-        logger.info(f"Starting comprehensive ESPN player scraping (target: {target_count} players)")
+        logger.info(f"Scraping {comp_name} ({continent} - {country})")
         
-        # Get all team squad URLs
-        squad_urls = self.get_team_squad_urls()
+        # Get all teams in this competition
+        teams = self.get_competition_teams(comp_id)
+        
+        if not teams:
+            logger.warning(f"No teams found for {comp_name}")
+            return []
         
         all_players = []
         
-        # Use ThreadPoolExecutor for concurrent scraping
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit squad scraping tasks
-            squad_futures = {executor.submit(self.extract_players_from_squad_page, squad_info): squad_info 
-                           for squad_info in squad_urls}
-            
-            for future in as_completed(squad_futures):
-                try:
-                    players = future.result(timeout=60)
-                    all_players.extend(players)
-                    
-                    logger.info(f"Total players collected so far: {len(all_players)}")
-                    
-                    # Stop if we've reached our target
-                    if len(all_players) >= target_count:
-                        logger.info(f"Reached target of {target_count} players")
-                        break
-                        
-                except Exception as e:
-                    squad_info = squad_futures[future]
-                    logger.error(f"Error scraping squad {squad_info['team']}: {e}")
+        # Get players from each team
+        for team in teams:
+            try:
+                players = self.get_team_squad(team)
                 
-                # Small delay between squad extractions
-                time.sleep(1)
-        
-        logger.info(f"Collected {len(all_players)} players from squad pages")
-        
-        # Enhance player details if requested
-        if enhance_details and all_players:
-            logger.info("Enhancing player details...")
-            enhanced_players = []
-            
-            # Limit enhancement to prevent excessive requests
-            players_to_enhance = all_players[:min(len(all_players), target_count)]
-            
-            with ThreadPoolExecutor(max_workers=2) as executor:  # Fewer workers for profile scraping
-                enhance_futures = {executor.submit(self.enhance_player_details, player): player 
-                                 for player in players_to_enhance}
+                # Add competition info to each player
+                for player in players:
+                    player['League'] = comp_name
+                    player['Country'] = country
+                    player['Continent'] = continent
+                    player['Competition_ID'] = comp_id
                 
-                for future in as_completed(enhance_futures):
+                all_players.extend(players)
+                
+                # Respectful delay between teams
+                time.sleep(random.uniform(2, 5))
+                
+            except Exception as e:
+                logger.error(f"Error scraping team {team['name']}: {e}")
+                continue
+        
+        logger.info(f"Completed {comp_name}: {len(all_players)} players")
+        return all_players
+    
+    def scrape_all_global_players(self, max_competitions_per_continent=None, target_players=None):
+        """
+        Scrape players from all global competitions
+        
+        Args:
+            max_competitions_per_continent (int): Limit competitions per continent
+            target_players (int): Stop when reaching this many players
+            
+        Returns:
+            pandas.DataFrame: All player data
+        """
+        logger.info("🌍 Starting GLOBAL Transfermarkt player scraping")
+        logger.info(f"Target: {'All available' if not target_players else f'{target_players}'} players worldwide")
+        
+        all_players = []
+        total_competitions = 0
+        
+        # Count total competitions
+        for continent_data in self.global_competitions.values():
+            for country_data in continent_data.values():
+                total_competitions += len(country_data)
+        
+        logger.info(f"📊 Total competitions to scrape: {total_competitions}")
+        
+        competitions_scraped = 0
+        
+        try:
+            # Use ThreadPoolExecutor for concurrent scraping
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # Create tasks for all competitions
+                future_to_comp = {}
+                
+                for continent, continent_data in self.global_competitions.items():
+                    competitions_in_continent = 0
+                    
+                    for country, competitions in continent_data.items():
+                        for competition in competitions:
+                            # Skip if we've reached the limit for this continent
+                            if max_competitions_per_continent and competitions_in_continent >= max_competitions_per_continent:
+                                break
+                            
+                            future = executor.submit(self.scrape_competition, continent, country, competition)
+                            future_to_comp[future] = {
+                                'continent': continent,
+                                'country': country,
+                                'competition': competition
+                            }
+                            competitions_in_continent += 1
+                    
+                    if max_competitions_per_continent and competitions_in_continent >= max_competitions_per_continent:
+                        logger.info(f"Reached limit of {max_competitions_per_continent} competitions for {continent}")
+                
+                # Process completed futures
+                for future in as_completed(future_to_comp):
+                    comp_info = future_to_comp[future]
+                    competitions_scraped += 1
+                    
                     try:
-                        enhanced_player = future.result(timeout=30)
-                        enhanced_players.append(enhanced_player)
-                    except Exception as e:
-                        player = enhance_futures[future]
-                        logger.warning(f"Failed to enhance {player['Player Name']}: {e}")
-                        enhanced_players.append(player)  # Add original data
+                        players = future.result(timeout=300)  # 5 minute timeout per competition
+                        all_players.extend(players)
+                        
+                        logger.info(f"✅ [{competitions_scraped}/{len(future_to_comp)}] {comp_info['competition']['name']}: {len(players)} players")
+                        logger.info(f"🔢 Total players so far: {len(all_players)}")
+                        
+                        # Check if we've reached target
+                        if target_players and len(all_players) >= target_players:
+                            logger.info(f"🎯 Reached target of {target_players} players!")
+                            break
                     
-                    time.sleep(0.5)  # Respectful delay
-            
-            all_players = enhanced_players
+                    except Exception as e:
+                        logger.error(f"❌ Failed to scrape {comp_info['competition']['name']}: {e}")
+                    
+                    # Progress update
+                    if competitions_scraped % 10 == 0:
+                        logger.info(f"📈 Progress: {competitions_scraped}/{len(future_to_comp)} competitions completed")
         
-        # Remove duplicates based on player name and team
-        seen = set()
+        except KeyboardInterrupt:
+            logger.info("🛑 Scraping interrupted by user")
+        
+        # Remove duplicates based on name and club
+        logger.info("🧹 Removing duplicate players...")
         unique_players = []
-        for player in all_players:
-            key = (player['Player Name'].lower(), player['Team/Club'].lower())
-            if key not in seen:
-                seen.add(key)
-                unique_players.append(player)
+        seen = set()
         
-        logger.info(f"Final unique player count: {len(unique_players)}")
+        for player in all_players:
+            key = (player['Name'].lower().strip(), player['Club'].lower().strip())
+            if key not in seen:
+                unique_players.append(player)
+                seen.add(key)
+        
+        logger.info(f"📊 Final count: {len(unique_players)} unique players (removed {len(all_players) - len(unique_players)} duplicates)")
         
         # Create DataFrame
         df = pd.DataFrame(unique_players)
         
-        # Clean and format data
+        # Clean and enhance data if not empty
         if not df.empty:
-            # Clean numeric columns
-            numeric_cols = ['Jersey Number', 'Age', 'Matches Played', 'Minutes Played', 
-                          'Goals', 'Assists', 'Shots', 'Shots on Target', 'Yellow Cards', 
-                          'Red Cards', 'Clean Sheets', 'Saves']
+            # Ensure required columns exist
+            required_columns = ['Name', 'Club', 'Nationality', 'Goals', 'Assists']
+            for col in required_columns:
+                if col not in df.columns:
+                    df[col] = ''
             
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna('')
-            
-            # Clean percentage columns
-            if 'Pass Completion %' in df.columns:
-                df['Pass Completion %'] = df['Pass Completion %'].astype(str).str.extract('(\d+)').fillna('')
+            # Clean data
+            df = self._clean_dataframe(df)
         
         return df
     
-    def save_to_enhanced_excel(self, df, filename='enhanced_players_data.xlsx'):
+    def _clean_dataframe(self, df):
+        """Clean and standardize the DataFrame"""
+        # Remove rows with empty names
+        df = df[df['Name'].notna() & (df['Name'] != '')]
+        
+        # Clean numeric columns
+        numeric_cols = ['Age', 'Jersey Number']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna('')
+        
+        # Clean market value column
+        if 'Market Value' in df.columns:
+            df['Market Value'] = df['Market Value'].astype(str).str.replace('€', '').str.strip()
+        
+        # Standardize nationality
+        if 'Nationality' in df.columns:
+            df['Nationality'] = df['Nationality'].str.replace('  ', ' ').str.strip()
+        
+        return df
+    
+    def save_to_comprehensive_excel(self, df, filename='transfermarkt_global_players.xlsx'):
         """
-        Save DataFrame to Excel with enhanced formatting and multiple sheets
+        Save DataFrame to Excel with comprehensive formatting and analysis
         """
+        if df.empty:
+            logger.error("No data to save")
+            return
+        
         try:
             with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
                 # Main data sheet
                 df.to_excel(writer, sheet_name='All Players', index=False)
                 
-                # Get workbook and worksheet objects
                 workbook = writer.book
                 worksheet = writer.sheets['All Players']
                 
@@ -529,454 +675,463 @@ class EnhancedESPNPlayerScraper:
                     'bold': True,
                     'text_wrap': True,
                     'valign': 'top',
-                    'fg_color': '#4F81BD',
+                    'fg_color': '#1f4e79',
                     'font_color': 'white',
                     'border': 1
                 })
                 
                 number_format = workbook.add_format({'num_format': '0'})
-                url_format = workbook.add_format({'color': 'blue', 'underline': 1})
+                currency_format = workbook.add_format({'num_format': '#,##0'})
                 
-                # Format headers
+                # Apply header formatting
                 for col_num, value in enumerate(df.columns.values):
                     worksheet.write(0, col_num, value, header_format)
                 
                 # Format specific columns
-                if 'Profile URL' in df.columns:
-                    url_col = df.columns.get_loc('Profile URL')
-                    worksheet.set_column(url_col, url_col, 50, url_format)
+                if 'Age' in df.columns:
+                    age_col = df.columns.get_loc('Age')
+                    worksheet.set_column(age_col, age_col, 8, number_format)
                 
-                # Format numeric columns
-                numeric_cols = ['Jersey Number', 'Age', 'Matches Played', 'Goals', 'Assists']
-                for col in numeric_cols:
-                    if col in df.columns:
-                        col_idx = df.columns.get_loc(col)
-                        worksheet.set_column(col_idx, col_idx, 12, number_format)
+                if 'Jersey Number' in df.columns:
+                    jersey_col = df.columns.get_loc('Jersey Number')
+                    worksheet.set_column(jersey_col, jersey_col, 12, number_format)
                 
-                # Auto-adjust other column widths
+                # Auto-adjust column widths
                 for column in df:
-                    if column not in numeric_cols + ['Profile URL']:
-                        column_length = max(df[column].astype(str).map(len).max(), len(column))
-                        col_idx = df.columns.get_loc(column)
-                        worksheet.set_column(col_idx, col_idx, min(column_length + 2, 25))
+                    column_length = max(df[column].astype(str).map(len).max(), len(column))
+                    col_idx = df.columns.get_loc(column)
+                    worksheet.set_column(col_idx, col_idx, min(column_length + 2, 30))
                 
                 # Create summary sheets
-                if not df.empty:
-                    # Players by League
-                    if 'League' in df.columns:
-                        league_summary = df.groupby('League').size().reset_index(name='Player Count')
-                        league_summary.to_excel(writer, sheet_name='By League', index=False)
-                    
-                    # Players by Position
-                    if 'Position' in df.columns:
-                        position_summary = df.groupby('Position').size().reset_index(name='Player Count')
-                        position_summary.to_excel(writer, sheet_name='By Position', index=False)
-                    
-                    # Top Scorers (if goals data available)
-                    if 'Goals' in df.columns:
-                        top_scorers = df.nlargest(20, 'Goals')[['Player Name', 'Team/Club', 'Goals']]
-                        top_scorers.to_excel(writer, sheet_name='Top Scorers', index=False)
+                self._create_summary_sheets(df, writer, workbook)
             
-            logger.info(f"Enhanced data saved to {filename}")
+            logger.info(f"💾 Data saved to {filename}")
             
         except Exception as e:
             logger.error(f"Error saving to Excel: {e}")
-            # Fallback to CSV
-            csv_filename = filename.replace('.xlsx', '.csv')
-            df.to_csv(csv_filename, index=False)
-            logger.info(f"Saved as CSV instead: {csv_filename}")
+            # Fallback to CSV (but we prefer Excel as requested)
+            try:
+                csv_filename = filename.replace('.xlsx', '.csv')
+                df.to_csv(csv_filename, index=False, encoding='utf-8')
+                logger.info(f"💾 Saved as CSV fallback: {csv_filename}")
+            except Exception as csv_error:
+                logger.error(f"Failed to save CSV fallback: {csv_error}")
+    
+    def _create_summary_sheets(self, df, writer, workbook):
+        """Create summary analysis sheets"""
+        header_format = workbook.add_format({
+            'bold': True,
+            'fg_color': '#1f4e79',
+            'font_color': 'white',
+            'border': 1
+        })
+        
+        # Players by Continent
+        if 'Continent' in df.columns:
+            continent_summary = df.groupby('Continent').agg({
+                'Name': 'count',
+                'Club': 'nunique'
+            }).rename(columns={'Name': 'Total Players', 'Club': 'Total Clubs'}).reset_index()
+            continent_summary.to_excel(writer, sheet_name='By Continent', index=False)
+            
+            # Format continent sheet
+            continent_sheet = writer.sheets['By Continent']
+            for col_num, value in enumerate(continent_summary.columns.values):
+                continent_sheet.write(0, col_num, value, header_format)
+        
+        # Players by Country
+        if 'Country' in df.columns:
+            country_summary = df.groupby(['Continent', 'Country']).size().reset_index(name='Player Count')
+            country_summary.to_excel(writer, sheet_name='By Country', index=False)
+            
+            country_sheet = writer.sheets['By Country']
+            for col_num, value in enumerate(country_summary.columns.values):
+                country_sheet.write(0, col_num, value, header_format)
+        
+        # Players by League
+        if 'League' in df.columns:
+            league_summary = df.groupby(['Country', 'League']).size().reset_index(name='Player Count')
+            league_summary = league_summary.sort_values('Player Count', ascending=False)
+            league_summary.to_excel(writer, sheet_name='By League', index=False)
+            
+            league_sheet = writer.sheets['By League']
+            for col_num, value in enumerate(league_summary.columns.values):
+                league_sheet.write(0, col_num, value, header_format)
+        
+        # Top Clubs by Player Count
+        if 'Club' in df.columns:
+            club_summary = df.groupby(['Country', 'Club']).size().reset_index(name='Player Count')
+            club_summary = club_summary.sort_values('Player Count', ascending=False).head(50)
+            club_summary.to_excel(writer, sheet_name='Top Clubs', index=False)
+            
+            club_sheet = writer.sheets['Top Clubs']
+            for col_num, value in enumerate(club_summary.columns.values):
+                club_sheet.write(0, col_num, value, header_format)
+        
+        # Nationality Distribution
+        if 'Nationality' in df.columns:
+            nationality_summary = df[df['Nationality'] != ''].groupby('Nationality').size().reset_index(name='Player Count')
+            nationality_summary = nationality_summary.sort_values('Player Count', ascending=False).head(50)
+            nationality_summary.to_excel(writer, sheet_name='Top Nationalities', index=False)
+            
+            nationality_sheet = writer.sheets['Top Nationalities']
+            for col_num, value in enumerate(nationality_summary.columns.values):
+                nationality_sheet.write(0, col_num, value, header_format)
+        
+        # Position Distribution
+        if 'Position' in df.columns:
+            position_summary = df[df['Position'] != ''].groupby('Position').size().reset_index(name='Player Count')
+            position_summary = position_summary.sort_values('Player Count', ascending=False)
+            position_summary.to_excel(writer, sheet_name='By Position', index=False)
+            
+            position_sheet = writer.sheets['By Position']
+            for col_num, value in enumerate(position_summary.columns.values):
+                position_sheet.write(0, col_num, value, header_format)
     
     def __del__(self):
-        """Cleanup method"""
+        """Cleanup Selenium driver"""
         if self.driver:
-            self.driver.quit()
+            try:
+                self.driver.quit()
+            except:
+                pass
+
+# Enhanced monitoring and statistics
+class GlobalScrapingMonitor:
+    def __init__(self):
+        self.start_time = None
+        self.players_scraped = 0
+        self.competitions_completed = 0
+        self.countries_completed = 0
+        self.errors = 0
+        self.current_competition = ""
+    
+    def start(self, total_competitions):
+        self.start_time = time.time()
+        self.total_competitions = total_competitions
+        print(f"🚀 Starting global scraping of {total_competitions} competitions...")
+    
+    def update_competition(self, competition_name, country):
+        self.current_competition = f"{competition_name} ({country})"
+        self.competitions_completed += 1
+    
+    def add_players(self, count):
+        self.players_scraped += count
+        
+        if self.players_scraped % 100 == 0:  # Update every 100 players
+            elapsed = time.time() - self.start_time if self.start_time else 0
+            rate = self.players_scraped / elapsed if elapsed > 0 else 0
+            completion = (self.competitions_completed / self.total_competitions * 100) if hasattr(self, 'total_competitions') else 0
+            
+            print(f"📊 Progress: {self.players_scraped:,} players | {self.competitions_completed} competitions | {completion:.1f}% | {rate:.1f} players/sec")
+    
+    def add_error(self):
+        self.errors += 1
+    
+    def summary(self):
+        if self.start_time:
+            elapsed = time.time() - self.start_time
+            print(f"\n🏆 SCRAPING COMPLETED!")
+            print(f"=" * 50)
+            print(f"⏱️  Total time: {elapsed/60:.1f} minutes")
+            print(f"👥 Players scraped: {self.players_scraped:,}")
+            print(f"🏆 Competitions completed: {self.competitions_completed}")
+            print(f"❌ Errors encountered: {self.errors}")
+            print(f"⚡ Average rate: {self.players_scraped/elapsed:.2f} players/second")
+            print(f"🎯 Success rate: {((self.competitions_completed - self.errors) / self.competitions_completed * 100):.1f}%" if self.competitions_completed > 0 else "N/A")
 
 def main():
-    """Enhanced main execution function"""
-    print("🏈 Enhanced ESPN Football Player Scraper")
-    print("=" * 50)
-    print("Target: 200+ players with comprehensive details")
-    print("=" * 50)
+    """Enhanced main function for global scraping"""
+    print("🌍 TRANSFERMARKT GLOBAL PLAYER SCRAPER")
+    print("=" * 60)
+    print("🎯 Objective: Scrape ALL football players worldwide")
+    print("📊 Source: Transfermarkt.com")
+    print("🗂️  Output: Comprehensive Excel file")
+    print("=" * 60)
     
-    # Configuration
-    TARGET_PLAYERS = 250
-    ENHANCE_DETAILS = True  # Set to False for faster scraping
-    USE_SELENIUM = False  # Try requests first
-    
-    print(f"Configuration:")
-    print(f"  - Target players: {TARGET_PLAYERS}")
-    print(f"  - Enhance details: {ENHANCE_DETAILS}")
-    print(f"  - Use Selenium: {USE_SELENIUM}")
-    print()
-    
-    # Initialize scraper
-    scraper = EnhancedESPNPlayerScraper(
-        use_selenium=USE_SELENIUM,
-        max_workers=3
-    )
+    # Configuration options
+    print("\n⚙️  CONFIGURATION OPTIONS:")
+    print("1. 🌍 Full Global Scrape (All continents, all leagues)")
+    print("2. 🌎 Continental Focus (Limit to specific continents)")
+    print("3. 🏆 Top Leagues Only (Major leagues from each continent)")
+    print("4. 🚀 Quick Sample (Small sample for testing)")
     
     try:
-        start_time = time.time()
+        choice = input("\nSelect scraping mode (1-4) [default: 1]: ").strip() or "1"
         
-        # Scrape players
-        df = scraper.scrape_all_players_comprehensive(
-            enhance_details=ENHANCE_DETAILS,
-            target_count=TARGET_PLAYERS
+        # Initialize scraper
+        use_selenium = input("Use Selenium for dynamic content? (y/n) [default: n]: ").strip().lower() == 'y'
+        max_workers = int(input("Number of concurrent workers (1-10) [default: 3]: ").strip() or "3")
+        
+        scraper = TransfermarktGlobalScraper(
+            use_selenium=use_selenium,
+            max_workers=min(max_workers, 10)
         )
         
-        if df.empty:
-            print("No data scraped with current method. Trying Selenium...")
-            scraper = EnhancedESPNPlayerScraper(use_selenium=True, max_workers=2)
-            df = scraper.scrape_all_players_comprehensive(
-                enhance_details=ENHANCE_DETAILS,
-                target_count=TARGET_PLAYERS
+        monitor = GlobalScrapingMonitor()
+        
+        # Set parameters based on choice
+        if choice == "1":
+            # Full global scrape
+            print("\n🌍 FULL GLOBAL SCRAPING MODE")
+            print("This will scrape ALL leagues from ALL continents")
+            print("Expected players: 50,000+ | Time: 3-6 hours")
+            
+            confirm = input("Proceed with full global scrape? (y/n): ").strip().lower()
+            if confirm != 'y':
+                print("👋 Scraping cancelled")
+                return
+            
+            df = scraper.scrape_all_global_players()
+            filename = 'transfermarkt_global_all_players.xlsx'
+            
+        elif choice == "2":
+            # Continental focus
+            print("\n🌎 CONTINENTAL FOCUS MODE")
+            continents = list(scraper.global_competitions.keys())
+            print("Available continents:")
+            for i, continent in enumerate(continents, 1):
+                print(f"  {i}. {continent}")
+            
+            selected = input("Select continents (comma-separated numbers): ").strip()
+            selected_continents = [continents[int(x)-1] for x in selected.split(',') if x.strip().isdigit()]
+            
+            # Filter competitions
+            filtered_competitions = {k: v for k, v in scraper.global_competitions.items() if k in selected_continents}
+            scraper.global_competitions = filtered_competitions
+            
+            df = scraper.scrape_all_global_players()
+            filename = f'transfermarkt_{"-".join(selected_continents).lower()}_players.xlsx'
+            
+        elif choice == "3":
+            # Top leagues only
+            print("\n🏆 TOP LEAGUES MODE")
+            print("Scraping only tier 1 leagues from each continent")
+            
+            # Filter to only tier 1 competitions
+            filtered_competitions = {}
+            for continent, countries in scraper.global_competitions.items():
+                filtered_competitions[continent] = {}
+                for country, leagues in countries.items():
+                    tier1_leagues = [league for league in leagues if league.get('tier', 1) == 1]
+                    if tier1_leagues:
+                        filtered_competitions[continent][country] = tier1_leagues
+            
+            scraper.global_competitions = filtered_competitions
+            df = scraper.scrape_all_global_players()
+            filename = 'transfermarkt_top_leagues_players.xlsx'
+            
+        elif choice == "4":
+            # Quick sample
+            print("\n🚀 QUICK SAMPLE MODE")
+            print("Scraping a small sample for testing")
+            
+            df = scraper.scrape_all_global_players(
+                max_competitions_per_continent=2,
+                target_players=500
             )
+            filename = 'transfermarkt_sample_players.xlsx'
         
-        end_time = time.time()
-        elapsed_time = end_time - start_time
+        else:
+            print("Invalid choice, using full global scrape")
+            df = scraper.scrape_all_global_players()
+            filename = 'transfermarkt_global_all_players.xlsx'
         
+        # Process results
         if not df.empty:
-            print(f"\n✅ SUCCESS!")
-            print(f"📊 Scraped {len(df)} players in {elapsed_time:.1f} seconds")
-            print(f"⚡ Average: {len(df)/elapsed_time:.1f} players/second")
+            print(f"\n✅ SCRAPING SUCCESSFUL!")
+            print(f"📊 Total players scraped: {len(df):,}")
             
             # Display sample data
-            print(f"\n📋 Sample Data Preview:")
+            print(f"\n📋 SAMPLE DATA:")
             print("-" * 80)
-            sample_cols = ['Player Name', 'Team/Club', 'League', 'Position', 'Goals', 'Assists']
-            available_cols = [col for col in sample_cols if col in df.columns]
+            display_cols = ['Name', 'Club', 'Nationality', 'League', 'Country']
+            available_cols = [col for col in display_cols if col in df.columns]
             print(df[available_cols].head(10).to_string(index=False))
             
             # Save to Excel
-            print(f"\n💾 Saving to Excel...")
-            scraper.save_to_enhanced_excel(df, 'enhanced_players_data.xlsx')
+            print(f"\n💾 Saving to Excel: {filename}")
+            scraper.save_to_comprehensive_excel(df, filename)
             
-            # Statistics
-            print(f"\n📈 Scraping Statistics:")
-            print(f"  Total players: {len(df)}")
-            print(f"  Unique teams: {df['Team/Club'].nunique() if 'Team/Club' in df.columns else 'N/A'}")
-            print(f"  Leagues covered: {df['League'].nunique() if 'League' in df.columns else 'N/A'}")
-            print(f"  Players with goals data: {df['Goals'].notna().sum() if 'Goals' in df.columns else 'N/A'}")
-            print(f"  Players with nationality: {df['Nationality'].notna().sum() if 'Nationality' in df.columns else 'N/A'}")
-            print(f"  File saved: enhanced_players_data.xlsx")
+            # Display statistics
+            print(f"\n📈 FINAL STATISTICS:")
+            print(f"  📊 Total players: {len(df):,}")
+            print(f"  🏟️  Total clubs: {df['Club'].nunique() if 'Club' in df.columns else 'N/A'}")
+            print(f"  🌍 Countries covered: {df['Country'].nunique() if 'Country' in df.columns else 'N/A'}")
+            print(f"  🏆 Leagues covered: {df['League'].nunique() if 'League' in df.columns else 'N/A'}")
+            print(f"  🌎 Continents: {df['Continent'].nunique() if 'Continent' in df.columns else 'N/A'}")
+            print(f"  🗂️  Excel file: {filename}")
             
+            # Show top countries by player count
+            if 'Country' in df.columns:
+                print(f"\n🏆 TOP 10 COUNTRIES BY PLAYERS:")
+                top_countries = df['Country'].value_counts().head(10)
+                for country, count in top_countries.items():
+                    print(f"  {country}: {count:,} players")
+            
+            # Show top leagues
             if 'League' in df.columns:
-                print(f"\n🏆 Players by League:")
-                league_counts = df['League'].value_counts()
-                for league, count in league_counts.items():
-                    print(f"  {league}: {count} players")
+                print(f"\n🥇 TOP 10 LEAGUES BY PLAYERS:")
+                top_leagues = df['League'].value_counts().head(10)
+                for league, count in top_leagues.items():
+                    print(f"  {league}: {count:,} players")
             
+            print(f"\n🎉 SUCCESS! Data saved to: {filename}")
+        
         else:
-            print("❌ No player data could be scraped.")
-            print("This might be due to:")
-            print("  - ESPN website structure changes")
+            print("❌ NO DATA SCRAPED")
+            print("Possible reasons:")
+            print("  - Transfermarkt website structure changes")
+            print("  - Rate limiting or blocking")
             print("  - Network connectivity issues")
-            print("  - Rate limiting or IP blocking")
-            print("  - JavaScript-heavy content requiring Selenium")
+            print("  - Selenium WebDriver issues")
             
+            print("\n🔧 TROUBLESHOOTING SUGGESTIONS:")
+            print("  1. Try with Selenium enabled")
+            print("  2. Reduce number of workers")
+            print("  3. Check internet connection")
+            print("  4. Verify ChromeDriver installation")
+    
     except KeyboardInterrupt:
         print("\n🛑 Scraping interrupted by user")
     except Exception as e:
-        print(f"❌ An error occurred: {e}")
+        print(f"❌ Critical error: {e}")
         logger.error(f"Main execution error: {e}")
     finally:
         # Cleanup
-        if scraper.driver:
+        if 'scraper' in locals() and scraper.driver:
             scraper.driver.quit()
         print("\n🧹 Cleanup completed")
 
-def install_requirements():
-    """Display required packages for installation"""
-    required_packages = [
-        'requests>=2.28.0',
-        'beautifulsoup4>=4.11.0',
-        'pandas>=1.5.0',
-        'selenium>=4.0.0',
-        'xlsxwriter>=3.0.0',
-        'lxml>=4.9.0'
-    ]
-    
-    print("📦 Required Packages:")
-    print("Run the following command to install all dependencies:")
-    print()
-    print("pip install " + " ".join([pkg.split('>=')[0] for pkg in required_packages]))
-    print()
-    print("📋 Individual packages:")
-    for package in required_packages:
-        print(f"  - {package}")
-    print()
-    print("🔧 Additional Setup:")
-    print("  - Download ChromeDriver: https://chromedriver.chromium.org/")
-    print("  - Add ChromeDriver to PATH or project directory")
-    print("  - Ensure Chrome browser is installed")
-    print()
-
-if __name__ == "__main__":
-    print("🚀 ESPN Player Scraper Setup")
-    print("=" * 40)
-    
-    # Display requirements
-    install_requirements()
-    
-    # Ask user if they want to proceed
+# Additional utility functions
+def analyze_transfermarkt_data(filename='transfermarkt_global_all_players.xlsx'):
+    """Analyze the scraped Transfermarkt data"""
     try:
-        proceed = input("Do you want to start scraping? (y/n): ").lower().strip()
-        if proceed in ['y', 'yes', '1']:
-            main()
-        else:
-            print("👋 Setup complete. Run the script again when ready!")
-    except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
-
-# Additional utility functions for data analysis
-def analyze_scraped_data(filename='enhanced_players_data.xlsx'):
-    """
-    Analyze the scraped player data
-    
-    Args:
-        filename (str): Excel file to analyze
-    """
-    try:
-        df = pd.read_excel(filename, sheet_name='All Players')
-        
-        print(f"📊 Data Analysis for {filename}")
+        print(f"📊 ANALYZING DATA FROM: {filename}")
         print("=" * 50)
         
-        print(f"📈 Basic Statistics:")
-        print(f"  Total Players: {len(df)}")
-        print(f"  Total Teams: {df['Team/Club'].nunique() if 'Team/Club' in df.columns else 'N/A'}")
-        print(f"  Total Leagues: {df['League'].nunique() if 'League' in df.columns else 'N/A'}")
+        df = pd.read_excel(filename, sheet_name='All Players')
         
-        if 'Goals' in df.columns:
-            goals_data = pd.to_numeric(df['Goals'], errors='coerce').dropna()
-            if not goals_data.empty:
-                print(f"  Average Goals: {goals_data.mean():.2f}")
-                print(f"  Top Scorer: {goals_data.max()} goals")
+        print(f"📈 BASIC STATISTICS:")
+        print(f"  Total Players: {len(df):,}")
+        print(f"  Unique Clubs: {df['Club'].nunique() if 'Club' in df.columns else 'N/A'}")
+        print(f"  Countries: {df['Country'].nunique() if 'Country' in df.columns else 'N/A'}")
+        print(f"  Leagues: {df['League'].nunique() if 'League' in df.columns else 'N/A'}")
         
+        # Age analysis
         if 'Age' in df.columns:
-            age_data = pd.to_numeric(df['Age'], errors='coerce').dropna()
-            if not age_data.empty:
-                print(f"  Average Age: {age_data.mean():.1f} years")
-                print(f"  Youngest Player: {age_data.min()} years")
-                print(f"  Oldest Player: {age_data.max()} years")
+            ages = pd.to_numeric(df['Age'], errors='coerce').dropna()
+            if not ages.empty:
+                print(f"\n👥 AGE STATISTICS:")
+                print(f"  Average Age: {ages.mean():.1f} years")
+                print(f"  Youngest: {ages.min()} years")
+                print(f"  Oldest: {ages.max()} years")
+                print(f"  Most common age: {ages.mode().iloc[0] if not ages.mode().empty else 'N/A'}")
+        
+        # Nationality analysis
+        if 'Nationality' in df.columns:
+            nationalities = df[df['Nationality'].notna() & (df['Nationality'] != '')]
+            print(f"\n🌍 NATIONALITY COVERAGE:")
+            print(f"  Players with nationality data: {len(nationalities):,}")
+            print(f"  Unique nationalities: {nationalities['Nationality'].nunique()}")
+            
+            print(f"\n  Top 10 Nationalities:")
+            top_nat = nationalities['Nationality'].value_counts().head(10)
+            for nat, count in top_nat.items():
+                print(f"    {nat}: {count:,}")
         
         # Data completeness
-        print(f"\n📋 Data Completeness:")
-        for col in df.columns:
-            non_empty = df[col].notna().sum()
-            percentage = (non_empty / len(df)) * 100
-            print(f"  {col}: {non_empty}/{len(df)} ({percentage:.1f}%)")
+        print(f"\n📋 DATA COMPLETENESS:")
+        for col in ['Name', 'Club', 'Nationality', 'Goals', 'Assists', 'Position', 'Age']:
+            if col in df.columns:
+                complete = df[col].notna().sum()
+                percentage = (complete / len(df)) * 100
+                print(f"  {col}: {complete:,}/{len(df):,} ({percentage:.1f}%)")
         
         return df
         
     except FileNotFoundError:
-        print(f"❌ File {filename} not found. Please run the scraper first.")
+        print(f"❌ File not found: {filename}")
+        print("Please run the scraper first to generate the data file.")
         return None
     except Exception as e:
         print(f"❌ Error analyzing data: {e}")
         return None
 
-def export_filtered_data(df, filters=None, output_file='filtered_players.xlsx'):
-    """
-    Export filtered player data
-    
-    Args:
-        df (pd.DataFrame): Player data
-        filters (dict): Filters to apply {'column': 'value'}
-        output_file (str): Output filename
-    """
-    if df is None or df.empty:
-        print("❌ No data to filter")
-        return
-    
-    filtered_df = df.copy()
-    
-    if filters:
-        for column, value in filters.items():
-            if column in filtered_df.columns:
-                filtered_df = filtered_df[filtered_df[column].str.contains(str(value), case=False, na=False)]
-        
-        print(f"📊 Filtered data: {len(filtered_df)} players (from {len(df)})")
-    
-    try:
-        filtered_df.to_excel(output_file, index=False)
-        print(f"💾 Filtered data saved to: {output_file}")
-    except Exception as e:
-        print(f"❌ Error saving filtered data: {e}")
-
-# Example usage for data analysis
-def example_analysis():
-    """Example of how to analyze the scraped data"""
-    print("🔍 Example Data Analysis")
+def quick_scrape_sample():
+    """Quick function to scrape a small sample for testing"""
+    print("🚀 QUICK SAMPLE SCRAPE")
     print("=" * 30)
     
-    # Load and analyze data
-    df = analyze_scraped_data()
-    
-    if df is not None:
-        print(f"\n🏆 Top 10 Goal Scorers:")
-        if 'Goals' in df.columns:
-            top_scorers = df.nlargest(10, 'Goals')[['Player Name', 'Team/Club', 'Goals']]
-            print(top_scorers.to_string(index=False))
-        
-        print(f"\n🌍 Players by Nationality:")
-        if 'Nationality' in df.columns:
-            nationality_counts = df['Nationality'].value_counts().head(10)
-            for nat, count in nationality_counts.items():
-                print(f"  {nat}: {count}")
-        
-        # Export Premier League players only
-        export_filtered_data(
-            df, 
-            filters={'League': 'Premier League'},
-            output_file='premier_league_players.xlsx'
-        )
-
-# Performance monitoring
-class ScrapingMonitor:
-    """Monitor scraping performance and statistics"""
-    
-    def __init__(self):
-        self.start_time = None
-        self.players_scraped = 0
-        self.errors = 0
-        self.requests_made = 0
-    
-    def start(self):
-        self.start_time = time.time()
-        print("🚀 Scraping started...")
-    
-    def log_player(self, player_name):
-        self.players_scraped += 1
-        if self.players_scraped % 10 == 0:
-            elapsed = time.time() - self.start_time
-            rate = self.players_scraped / elapsed if elapsed > 0 else 0
-            print(f"📊 Progress: {self.players_scraped} players | {rate:.1f}/sec | {self.errors} errors")
-    
-    def log_error(self, error_msg):
-        self.errors += 1
-        logger.warning(f"Error #{self.errors}: {error_msg}")
-    
-    def log_request(self):
-        self.requests_made += 1
-    
-    def summary(self):
-        if self.start_time:
-            elapsed = time.time() - self.start_time
-            print(f"\n📋 Scraping Summary:")
-            print(f"  Duration: {elapsed:.1f} seconds")
-            print(f"  Players scraped: {self.players_scraped}")
-            print(f"  Requests made: {self.requests_made}")
-            print(f"  Errors: {self.errors}")
-            print(f"  Success rate: {((self.requests_made - self.errors) / self.requests_made * 100):.1f}%" if self.requests_made > 0 else "N/A")
-            print(f"  Average rate: {self.players_scraped / elapsed:.2f} players/second" if elapsed > 0 else "N/A")
-
-# Configuration class for easy customization
-class ScrapingConfig:
-    """Configuration settings for the scraper"""
-    
-    # Target settings
-    TARGET_PLAYERS = 250
-    ENHANCE_DETAILS = True
-    USE_SELENIUM = False
-    MAX_WORKERS = 3
-    
-    # Rate limiting
-    DELAY_BETWEEN_REQUESTS = 1.0
-    DELAY_BETWEEN_PROFILES = 0.5
-    TIMEOUT = 15
-    MAX_RETRIES = 3
-    
-    # Output settings
-    OUTPUT_FILENAME = 'enhanced_players_data.xlsx'
-    INCLUDE_SUMMARY_SHEETS = True
-    
-    # Leagues to scrape (can be modified)
-    ACTIVE_LEAGUES = [
-        'Premier League',
-        'La Liga', 
-        'Serie A',
-        'Bundesliga',
-        'MLS'
-    ]
-    
-    @classmethod
-    def display(cls):
-        print("⚙️  Current Configuration:")
-        print(f"  Target Players: {cls.TARGET_PLAYERS}")
-        print(f"  Enhance Details: {cls.ENHANCE_DETAILS}")
-        print(f"  Use Selenium: {cls.USE_SELENIUM}")
-        print(f"  Max Workers: {cls.MAX_WORKERS}")
-        print(f"  Output File: {cls.OUTPUT_FILENAME}")
-        print(f"  Active Leagues: {', '.join(cls.ACTIVE_LEAGUES)}")
-        print()
-
-# Quick start function
-def quick_start():
-    """Quick start with minimal configuration"""
-    print("🚀 Quick Start Mode")
-    print("=" * 30)
-    
-    # Use conservative settings for reliability
-    scraper = EnhancedESPNPlayerScraper(
-        use_selenium=False,
-        max_workers=2
-    )
+    scraper = TransfermarktGlobalScraper(use_selenium=False, max_workers=2)
     
     try:
-        df = scraper.scrape_all_players_comprehensive(
-            enhance_details=False,  # Skip profile enhancement for speed
-            target_count=100       # Lower target for quick results
+        # Scrape just a few competitions for testing
+        df = scraper.scrape_all_global_players(
+            max_competitions_per_continent=1,
+            target_players=100
         )
         
         if not df.empty:
-            print(f"✅ Quick scraping completed: {len(df)} players")
-            scraper.save_to_enhanced_excel(df, 'quick_players_data.xlsx')
-            print("💾 Data saved to: quick_players_data.xlsx")
-        else:
-            print("❌ No data scraped in quick mode")
+            print(f"✅ Sample completed: {len(df)} players")
+            scraper.save_to_comprehensive_excel(df, 'transfermarkt_sample.xlsx')
+            print("💾 Saved to: transfermarkt_sample.xlsx")
             
+            # Show sample
+            display_cols = ['Name', 'Club', 'Nationality']
+            available_cols = [col for col in display_cols if col in df.columns]
+            print(f"\nSample data:")
+            print(df[available_cols].head().to_string(index=False))
+        else:
+            print("❌ No sample data scraped")
+    
     except Exception as e:
-        print(f"❌ Quick start failed: {e}")
+        print(f"❌ Sample scrape failed: {e}")
     finally:
         if scraper.driver:
             scraper.driver.quit()
 
-# Add this at the end of the file for additional functionality
 if __name__ == "__main__":
-    # Display menu for different options
-    print("🏈 ESPN Player Scraper - Multiple Options")
+    print("🏈⚽ TRANSFERMARKT GLOBAL SCRAPER")
     print("=" * 45)
-    print("1. Full Scraping (200+ players with details)")
-    print("2. Quick Scraping (100 players, basic data)")
-    print("3. Analyze Existing Data")
-    print("4. Show Requirements Only")
-    print("5. Example Analysis")
-    print("=" * 45)
+    print("Choose your option:")
+    print("1. 🌍 Full Global Scrape")
+    print("2. 📊 Analyze Existing Data") 
+    print("3. 🚀 Quick Sample Test")
+    print("4. 📋 Show Requirements")
     
     try:
-        choice = input("Select option (1-5): ").strip()
+        option = input("\nSelect option (1-4): ").strip()
         
-        if choice == '1':
+        if option == "1":
             main()
-        elif choice == '2':
-            quick_start()
-        elif choice == '3':
-            filename = input("Enter Excel filename (or press Enter for default): ").strip()
+        elif option == "2":
+            filename = input("Enter filename [default: transfermarkt_global_all_players.xlsx]: ").strip()
             if not filename:
-                filename = 'enhanced_players_data.xlsx'
-            analyze_scraped_data(filename)
-        elif choice == '4':
-            install_requirements()
-        elif choice == '5':
-            example_analysis()
+                filename = "transfermarkt_global_all_players.xlsx"
+            analyze_transfermarkt_data(filename)
+        elif option == "3":
+            quick_scrape_sample()
+        elif option == "4":
+            print("\n📦 REQUIRED PACKAGES:")
+            packages = [
+                'requests>=2.28.0',
+                'beautifulsoup4>=4.11.0', 
+                'pandas>=1.5.0',
+                'selenium>=4.0.0',
+                'xlsxwriter>=3.0.0',
+                'lxml>=4.9.0'
+            ]
+            print("pip install " + " ".join([p.split('>=')[0] for p in packages]))
+            print("\n🔧 ADDITIONAL REQUIREMENTS:")
+            print("- ChromeDriver (for Selenium option)")
+            print("- Stable internet connection")
+            print("- 2-8 GB free disk space (depending on scope)")
         else:
-            print("Invalid choice. Running full scraper...")
+            print("Invalid option, running full scraper...")
             main()
             
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
     except Exception as e:
         print(f"❌ Error: {e}")
-        print("Running default scraper...")
-        main()
