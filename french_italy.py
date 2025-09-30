@@ -8,15 +8,24 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import re
 
-class PremierLeagueScraper:
+class Ligue1SerieAScraper:
     def __init__(self):
         self.base_url = "https://www.transfermarkt.us"
         self.players_data = []
         self.driver = None
         self.scraped_teams = set()
         
-        # Premier League URL
-        self.premier_league_url = 'https://www.transfermarkt.us/premier-league/startseite/wettbewerb/GB1'
+        # League URLs
+        self.leagues = {
+            'Ligue 1': {
+                'url': 'https://www.transfermarkt.us/ligue-1/startseite/wettbewerb/FR1',
+                'teams_count': 18
+            },
+            'Serie A': {
+                'url': 'https://www.transfermarkt.us/serie-a/startseite/wettbewerb/IT1',
+                'teams_count': 20
+            }
+        }
     
     def setup_driver(self):
         """Setup Chrome driver with stealth options"""
@@ -54,19 +63,19 @@ class PremierLeagueScraper:
                 "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             })
             
-            print("✓ Chrome driver initialized successfully")
+            print("Chrome driver initialized successfully")
         except Exception as e:
-            print(f"✗ Error initializing Chrome driver: {e}")
+            print(f"Error initializing Chrome driver: {e}")
             raise
     
-    def get_premier_league_teams(self):
-        """Get top 20 Premier League teams (main table only)"""
+    def get_league_teams(self, league_url, league_name, max_teams):
+        """Get teams from a league"""
         print(f"\n{'='*70}")
-        print("⚽ Fetching Premier League teams...")
+        print(f"Fetching {league_name} teams...")
         print(f"{'='*70}\n")
         
         try:
-            self.driver.get(self.premier_league_url)
+            self.driver.get(league_url)
             time.sleep(5)
             
             WebDriverWait(self.driver, 25).until(
@@ -80,7 +89,7 @@ class PremierLeagueScraper:
             tables = self.driver.find_elements(By.CSS_SELECTOR, "table.items")
             
             if not tables:
-                print("✗ No tables found!")
+                print("No tables found!")
                 return []
             
             # Get the first table (main standings)
@@ -89,7 +98,7 @@ class PremierLeagueScraper:
             
             print(f"Found {len(team_rows)} rows in main table")
             
-            for row in team_rows[:20]:  # Only take first 20 rows (current season teams)
+            for row in team_rows[:max_teams]:
                 try:
                     # Look for team name in the row
                     team_links = row.find_elements(By.CSS_SELECTOR, "td.hauptlink a, td a.vereinprofil_tooltip")
@@ -111,32 +120,32 @@ class PremierLeagueScraper:
                                 'url': squad_url
                             })
                             seen_teams.add(team_name)
-                            print(f"  ✓ Added: {team_name}")
+                            print(f"  Added: {team_name}")
                             
-                            # Stop at 20 teams
-                            if len(teams) >= 20:
+                            # Stop at max teams
+                            if len(teams) >= max_teams:
                                 break
                 except Exception as e:
                     continue
             
-            print(f"\n✓ Selected {len(teams)} Premier League teams (current season)\n")
-            return teams[:20]  # Ensure max 20 teams
+            print(f"\nSelected {len(teams)} {league_name} teams\n")
+            return teams[:max_teams]
             
         except TimeoutException:
-            print("✗ Timeout loading Premier League page")
+            print(f"Timeout loading {league_name} page")
             return []
         except Exception as e:
-            print(f"✗ Error fetching teams: {e}")
+            print(f"Error fetching teams: {e}")
             return []
     
-    def scrape_team_players(self, team_name, team_url):
+    def scrape_team_players(self, team_name, team_url, league_name):
         """Scrape all players from a team"""
         
         if team_name in self.scraped_teams:
-            print(f"  ⏭ Skipping {team_name} (already scraped)")
+            print(f"  Skipping {team_name} (already scraped)")
             return
         
-        print(f"  → Scraping: {team_name}")
+        print(f"  Scraping: {team_name}")
         
         max_retries = 2
         for attempt in range(max_retries):
@@ -223,6 +232,7 @@ class PremierLeagueScraper:
                             'Age': age,
                             'Nationality': nationality,
                             'Club': team_name,
+                            'League': league_name,
                             'Goals': 0,
                             'Assists': 0
                         }
@@ -234,60 +244,66 @@ class PremierLeagueScraper:
                         continue
                 
                 self.scraped_teams.add(team_name)
-                print(f"  ✓ {team_name}: {player_count} players")
+                print(f"  {team_name}: {player_count} players")
                 break
                 
             except TimeoutException:
                 if attempt < max_retries - 1:
-                    print(f"  ⚠ Timeout (attempt {attempt + 1}/{max_retries}), retrying...")
+                    print(f"  Timeout (attempt {attempt + 1}/{max_retries}), retrying...")
                     time.sleep(8)
                 else:
-                    print(f"  ✗ Failed after {max_retries} attempts - SKIPPING")
+                    print(f"  Failed after {max_retries} attempts - SKIPPING")
                     self.scraped_teams.add(team_name)
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"  ⚠ Error (attempt {attempt + 1}/{max_retries}), retrying...")
+                    print(f"  Error (attempt {attempt + 1}/{max_retries}), retrying...")
                     time.sleep(8)
                 else:
-                    print(f"  ✗ Error - SKIPPING")
+                    print(f"  Error - SKIPPING")
                     self.scraped_teams.add(team_name)
     
-    def scrape_premier_league(self):
-        """Main scraping method for Premier League"""
+    def scrape_all_leagues(self):
+        """Main scraping method for both leagues"""
         print("\n" + "="*70)
-        print(" " * 18 + "PREMIER LEAGUE SCRAPER")
+        print(" " * 15 + "LIGUE 1 & SERIE A SCRAPER")
         print("="*70)
         
-        teams = self.get_premier_league_teams()
-        
-        if not teams:
-            print("✗ No teams found!")
-            return
-        
-        # Limit to maximum 20 teams
-        teams = teams[:20]
-        
-        print(f"{'='*70}")
-        print(f"Starting to scrape {len(teams)} teams...")
-        print(f"{'='*70}\n")
-        
-        for i, team in enumerate(teams, 1):
-            print(f"[{i}/{len(teams)}] ", end="")
-            self.scrape_team_players(team['name'], team['url'])
+        for league_name, league_info in self.leagues.items():
+            print(f"\n{'='*70}")
+            print(f"{league_name.upper()}")
+            print(f"{'='*70}")
             
-            # Variable delay between teams
-            delay = 4 + (i % 2)
-            time.sleep(delay)
+            teams = self.get_league_teams(
+                league_info['url'], 
+                league_name, 
+                league_info['teams_count']
+            )
+            
+            if not teams:
+                print(f"No teams found for {league_name}!")
+                continue
+            
+            print(f"{'='*70}")
+            print(f"Starting to scrape {len(teams)} {league_name} teams...")
+            print(f"{'='*70}\n")
+            
+            for i, team in enumerate(teams, 1):
+                print(f"[{i}/{len(teams)}] ", end="")
+                self.scrape_team_players(team['name'], team['url'], league_name)
+                
+                # Variable delay between teams
+                delay = 4 + (i % 2)
+                time.sleep(delay)
         
         print(f"\n{'='*70}")
-        print(f"✓ Scraping completed!")
-        print(f"✓ Total players collected: {len(self.players_data)}")
+        print(f"Scraping completed!")
+        print(f"Total players collected: {len(self.players_data)}")
         print(f"{'='*70}")
     
-    def save_to_excel(self, filename='premier_league_players.xlsx'):
+    def save_to_excel(self, filename='ligue1_seriea_players.xlsx'):
         """Save data to Excel"""
         if not self.players_data:
-            print("\n✗ No data to save!")
+            print("\nNo data to save!")
             return
         
         df = pd.DataFrame(self.players_data)
@@ -296,31 +312,37 @@ class PremierLeagueScraper:
         df = df.drop_duplicates(subset=['Name', 'Club'])
         
         # Reorder columns
-        columns_order = ['Name', 'Age', 'Nationality', 'Club', 'Goals', 'Assists']
+        columns_order = ['Name', 'Age', 'Nationality', 'Club', 'League', 'Goals', 'Assists']
         df = df[columns_order]
         
         # Save to Excel
         df.to_excel(filename, index=False, engine='openpyxl')
         
         print(f"\n{'='*70}")
-        print(f"📊 DATA SAVED")
+        print(f"DATA SAVED")
         print(f"{'='*70}")
         print(f"Filename: {filename}")
         print(f"Total players: {len(df)}")
-        print(f"\n📈 Players per club:")
+        
+        print(f"\nPlayers per league:")
+        league_counts = df['League'].value_counts()
+        for league, count in league_counts.items():
+            print(f"  {league}: {count} players")
+        
+        print(f"\nPlayers per club:")
         club_counts = df['Club'].value_counts()
         for club, count in club_counts.items():
-            print(f"  • {club}: {count} players")
+            print(f"  {club}: {count} players")
         
-        print(f"\n🌍 Top 5 Nationalities:")
+        print(f"\nTop 5 Nationalities:")
         nat_counts = df['Nationality'].value_counts().head(5)
         for nat, count in nat_counts.items():
-            print(f"  • {nat}: {count} players")
+            print(f"  {nat}: {count} players")
         
         # Calculate average age (excluding N/A)
         valid_ages = df[df['Age'] != 'N/A']['Age'].astype(int)
         if len(valid_ages) > 0:
-            print(f"\n⚖️ Average Age: {valid_ages.mean():.1f} years")
+            print(f"\nAverage Age: {valid_ages.mean():.1f} years")
         
         print(f"{'='*70}")
     
@@ -328,7 +350,7 @@ class PremierLeagueScraper:
         """Close browser"""
         if self.driver:
             self.driver.quit()
-            print("\n✓ Browser closed")
+            print("\nBrowser closed")
 
 
 def main():
@@ -337,29 +359,30 @@ def main():
     
     try:
         print("\n" + "="*70)
-        print("  PREMIER LEAGUE PLAYER SCRAPER - Transfermarkt.com")
+        print("  LIGUE 1 & SERIE A SCRAPER - Transfermarkt.com")
         print("="*70)
-        print("\n📦 Required: selenium pandas openpyxl")
-        print("   Install: pip install selenium pandas openpyxl\n")
+        print("\nRequired: selenium pandas openpyxl")
+        print("Install: pip install selenium pandas openpyxl\n")
         
-        scraper = PremierLeagueScraper()
+        scraper = Ligue1SerieAScraper()
         scraper.setup_driver()
         
-        print("\n⏳ Starting Premier League scrape (20 teams)...")
-        print("💡 Estimated time: 10-15 minutes\n")
+        print("\nStarting scrape...")
+        print("Ligue 1: 18 teams | Serie A: 20 teams")
+        print("Estimated time: 15-20 minutes\n")
         
-        scraper.scrape_premier_league()
-        scraper.save_to_excel('premier_league_players.xlsx')
+        scraper.scrape_all_leagues()
+        scraper.save_to_excel('ligue1_seriea_players.xlsx')
         
-        print("\n🎉 All done! Check 'premier_league_players.xlsx' for results.")
+        print("\nAll done! Check 'ligue1_seriea_players.xlsx' for results.")
         
     except KeyboardInterrupt:
-        print("\n\n⚠ Scraping interrupted by user")
+        print("\n\nScraping interrupted by user")
         if scraper and scraper.players_data:
-            print("💾 Saving partial data...")
-            scraper.save_to_excel('premier_league_players_partial.xlsx')
+            print("Saving partial data...")
+            scraper.save_to_excel('ligue1_seriea_players_partial.xlsx')
     except Exception as e:
-        print(f"\n✗ An error occurred: {e}")
+        print(f"\nAn error occurred: {e}")
         import traceback
         traceback.print_exc()
     finally:
