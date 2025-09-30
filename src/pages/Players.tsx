@@ -1,147 +1,58 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState } from "react";
+import axios from "axios";
 
-// TypeScript interfaces for API-Football response
+// --- Types ---
 interface PlayerStatistics {
-  team: {
-    id: number;
-    name: string;
-    logo: string;
-  };
-  league: {
-    id: number;
-    name: string;
-    country: string;
-    logo: string;
-    flag: string;
-    season: number;
-  };
-  games: {
-    appearences: number;
-    lineups: number;
-    minutes: number;
-    number: number | null;
-    position: string;
-    rating: string | null;
-    captain: boolean;
-  };
-  substitutes: {
-    in: number;
-    out: number;
-    bench: number;
-  };
-  shots: {
-    total: number | null;
-    on: number | null;
-  };
-  goals: {
-    total: number | null;
-    conceded: number | null;
-    assists: number | null;
-    saves: number | null;
-  };
-  passes: {
-    total: number | null;
-    key: number | null;
-    accuracy: number | null;
-  };
-  tackles: {
-    total: number | null;
-    blocks: number | null;
-    interceptions: number | null;
-  };
-  duels: {
-    total: number | null;
-    won: number | null;
-  };
-  dribbles: {
-    attempts: number | null;
-    success: number | null;
-    past: number | null;
-  };
-  fouls: {
-    drawn: number | null;
-    committed: number | null;
-  };
-  cards: {
-    yellow: number | null;
-    yellowred: number | null;
-    red: number | null;
-  };
-  penalty: {
-    won: number | null;
-    commited: number | null;
-    scored: number | null;
-    missed: number | null;
-    saved: number | null;
-  };
+  team: { id: number; name: string; logo: string };
+  league: { id: number; name: string; season: number };
+  games: { appearences: number; position: string };
+  goals: { total: number | null; assists: number | null };
 }
 
 interface Player {
   id: number;
   name: string;
-  firstname: string;
-  lastname: string;
   age: number;
-  birth: {
-    date: string;
-    place: string;
-    country: string;
-  };
   nationality: string;
-  height: string | null;
-  weight: string | null;
-  injured: boolean;
   photo: string;
+  injured: boolean;
   statistics: PlayerStatistics[];
 }
 
 interface ApiResponse {
-  get: string;
-  parameters: {
-    search: string;
-    season: string;
-  };
-  errors: any[];
-  results: number;
-  paging: {
-    current: number;
-    total: number;
-  };
   response: {
     player: Player;
     statistics: PlayerStatistics[];
   }[];
 }
 
-// Player position options for filtering
+// --- Filters ---
 const POSITION_OPTIONS = [
-  { value: '', label: 'All Positions' },
-  { value: 'Goalkeeper', label: 'Goalkeeper' },
-  { value: 'Defender', label: 'Defender' },
-  { value: 'Midfielder', label: 'Midfielder' },
-  { value: 'Attacker', label: 'Forward' },
+  { value: "", label: "All Positions" },
+  { value: "Goalkeeper", label: "Goalkeeper" },
+  { value: "Defender", label: "Defender" },
+  { value: "Midfielder", label: "Midfielder" },
+  { value: "Attacker", label: "Forward" },
 ];
 
 const Players: React.FC = () => {
-  // State management
   const [players, setPlayers] = useState<Player[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [positionFilter, setPositionFilter] = useState<string>('');
-  const [hasSearched, setHasSearched] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [positionFilter, setPositionFilter] = useState("");
+  const [hasSearched, setHasSearched] = useState(false);
 
-  // API configuration
-  const API_KEY = process.env.NEXT_PUBLIC_RAPIDAPI_KEY || 'YOUR_API_KEY_HERE';
-  const API_HOST = 'api-football-v1.p.rapidapi.com';
+  // API config
+  const API_KEY = process.env.NEXT_PUBLIC_RAPIDAPI_KEY!;
+  const API_HOST = "api-football-v1.p.rapidapi.com";
 
-  // Fetch players from API-Football
+  // --- Fetch Players ---
   const fetchPlayers = async (playerName: string) => {
     if (!playerName.trim()) {
-      setError('Please enter a player name to search');
+      setError("Please enter a player name");
       return;
     }
 
@@ -150,43 +61,31 @@ const Players: React.FC = () => {
     setHasSearched(true);
 
     try {
-      const response = await axios.get<ApiResponse>(
-        'https://api-football-v1.p.rapidapi.com/v3/players',
+      const { data } = await axios.get<ApiResponse>(
+        "https://api-football-v1.p.rapidapi.com/v3/players",
         {
-          params: {
-            search: playerName.trim(),
-            season: '2023'
-          },
+          params: { search: playerName.trim(), season: "2023" },
           headers: {
-            'X-RapidAPI-Key': API_KEY,
-            'X-RapidAPI-Host': API_HOST
-          }
+            "X-RapidAPI-Key": API_KEY,
+            "X-RapidAPI-Host": API_HOST,
+          },
         }
       );
 
-      if (response.data.errors && response.data.errors.length > 0) {
-        throw new Error(response.data.errors[0]);
-      }
-
-      // Transform the response data
-      const transformedPlayers: Player[] = response.data.response.map((item) => ({
+      const transformed = data.response.map((item) => ({
         ...item.player,
-        statistics: item.statistics
+        statistics: item.statistics,
       }));
 
-      setPlayers(transformedPlayers);
-    } catch (err) {
-      console.error('Error fetching players:', err);
+      setPlayers(transformed);
+    } catch (err: any) {
+      console.error("Error fetching players:", err);
       if (axios.isAxiosError(err)) {
-        if (err.response?.status === 429) {
-          setError('API rate limit exceeded. Please try again later.');
-        } else if (err.response?.status === 401) {
-          setError('Invalid API key. Please check your configuration.');
-        } else {
-          setError(err.response?.data?.message || 'Failed to fetch players');
-        }
+        if (err.response?.status === 429) setError("Rate limit exceeded, try later.");
+        else if (err.response?.status === 401) setError("Invalid API key.");
+        else setError(err.response?.data?.message || "Failed to fetch players");
       } else {
-        setError('An unexpected error occurred');
+        setError("Unexpected error");
       }
       setPlayers([]);
     } finally {
@@ -194,47 +93,41 @@ const Players: React.FC = () => {
     }
   };
 
-  // Handle search form submission
+  // --- Handlers ---
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchPlayers(searchTerm);
   };
 
-  // Handle Enter key press in search input
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch(e as any);
-    }
+    if (e.key === "Enter") handleSearch(e as any);
   };
 
-  // Filter players by position
-  const filteredPlayers = players.filter((player) => {
-    if (!positionFilter) return true;
-    
-    // Check if player has statistics and matches the position
-    return player.statistics.some((stat) => 
-      stat.games.position.toLowerCase().includes(positionFilter.toLowerCase())
-    );
-  });
+  // --- Helpers ---
+  const filteredPlayers = players.filter((p) =>
+    positionFilter
+      ? p.statistics.some((s) =>
+          s.games.position.toLowerCase().includes(positionFilter.toLowerCase())
+        )
+      : true
+  );
 
-  // Get player's primary team and position
-  const getPrimaryTeamAndPosition = (player: Player) => {
-    if (!player.statistics || player.statistics.length === 0) {
-      return { teamName: 'Unknown', position: 'Unknown', appearances: 0, goals: 0, assists: 0 };
+  const getPrimaryStats = (player: Player) => {
+    if (!player.statistics.length) {
+      return { team: "Unknown", pos: "Unknown", apps: 0, goals: 0, assists: 0, logo: "" };
     }
 
-    // Get the statistics with the most appearances
-    const primaryStat = player.statistics.reduce((prev, current) => 
-      (prev.games.appearences || 0) > (current.games.appearences || 0) ? prev : current
+    const best = player.statistics.reduce((prev, cur) =>
+      (prev.games.appearences || 0) > (cur.games.appearences || 0) ? prev : cur
     );
 
     return {
-      teamName: primaryStat.team.name,
-      position: primaryStat.games.position,
-      appearances: primaryStat.games.appearences || 0,
-      goals: primaryStat.goals.total || 0,
-      assists: primaryStat.goals.assists || 0,
-      teamLogo: primaryStat.team.logo
+      team: best.team.name,
+      pos: best.games.position,
+      apps: best.games.appearences || 0,
+      goals: best.goals.total || 0,
+      assists: best.goals.assists || 0,
+      logo: best.team.logo,
     };
   };
 
@@ -243,229 +136,100 @@ const Players: React.FC = () => {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            ⚽ Football Player Search
-          </h1>
-          <p className="text-lg text-gray-600">
-            Search for professional football players and their statistics
+          <h1 className="text-4xl font-bold">⚽ Football Player Search</h1>
+          <p className="text-gray-600">Search for professional football players</p>
+        </div>
+
+        {/* Search */}
+        <form onSubmit={handleSearch} className="bg-white shadow-lg rounded-xl p-6 mb-8 flex flex-col md:flex-row gap-4">
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Enter player name (e.g., Messi)"
+            className="flex-1 px-4 py-2 border rounded-lg"
+          />
+          <select
+            value={positionFilter}
+            onChange={(e) => setPositionFilter(e.target.value)}
+            className="px-4 py-2 border rounded-lg md:w-48"
+          >
+            {POSITION_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            type="submit"
+            disabled={loading || !searchTerm.trim()}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            {loading ? "Loading..." : "Search"}
+          </button>
+        </form>
+
+        {/* Error */}
+        {error && <div className="text-red-600 text-center mb-4">{error}</div>}
+
+        {/* Results */}
+        {filteredPlayers.length > 0 && (
+          <p className="mb-6 text-gray-600">
+            Found {filteredPlayers.length} player{filteredPlayers.length > 1 && "s"}
           </p>
-        </div>
+        )}
 
-        {/* Search Form */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <form onSubmit={handleSearch} className="space-y-4">
-            <div className="flex flex-col md:flex-row gap-4">
-              {/* Search Input */}
-              <div className="flex-1">
-                <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
-                  Player Name
-                </label>
-                <input
-                  id="search"
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder="Enter player name (e.g., Messi, Ronaldo, Haaland)"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                  disabled={loading}
-                />
-              </div>
+        {/* Player Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredPlayers.map((p) => {
+            const { team, pos, apps, goals, assists, logo } = getPrimaryStats(p);
 
-              {/* Position Filter */}
-              <div className="md:w-48">
-                <label htmlFor="position" className="block text-sm font-medium text-gray-700 mb-2">
-                  Position Filter
-                </label>
-                <select
-                  id="position"
-                  value={positionFilter}
-                  onChange={(e) => setPositionFilter(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
-                  disabled={loading}
-                >
-                  {POSITION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Search Button */}
-              <div className="md:w-32 flex items-end">
-                <button
-                  type="submit"
-                  disabled={loading || !searchTerm.trim()}
-                  className="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-medium"
-                >
-                  {loading ? (
-                    <div className="flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    </div>
-                  ) : (
-                    'Search'
+            return (
+              <div key={p.id} className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition">
+                {/* Banner */}
+                <div className="relative h-48 bg-gradient-to-r from-blue-400 to-purple-500">
+                  {p.photo && (
+                    <img src={p.photo} alt={p.name} className="w-full h-full object-cover" />
                   )}
-                </button>
+                  {logo && (
+                    <img src={logo} alt={team} className="absolute top-2 right-2 w-10 h-10 rounded-full bg-white p-1" />
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="p-6">
+                  <h3 className="text-xl font-bold mb-2">{p.name}</h3>
+                  <p className="text-sm text-gray-600">Age: {p.age} | {p.nationality}</p>
+                  <p className="text-sm text-gray-600">Team: {team} | Position: {pos}</p>
+
+                  <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="font-bold">{apps}</div>
+                      <div className="text-xs">Matches</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="font-bold text-green-600">{goals}</div>
+                      <div className="text-xs">Goals</div>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg p-2">
+                      <div className="font-bold text-purple-600">{assists}</div>
+                      <div className="text-xs">Assists</div>
+                    </div>
+                  </div>
+
+                  {p.injured && (
+                    <p className="mt-3 text-red-600 font-medium">⚠️ Currently Injured</p>
+                  )}
+                </div>
               </div>
-            </div>
-          </form>
+            );
+          })}
         </div>
 
-        {/* Loading State */}
-        {loading && (
-          <div className="text-center py-12">
-            <div className="inline-flex items-center space-x-2">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="text-lg text-gray-600">Searching for players...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-8">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              </div>
-              <div className="ml-3">
-                <h3 className="text-sm font-medium text-red-800">Error</h3>
-                <p className="text-sm text-red-700 mt-1">{error}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* No Results State */}
+        {/* No results */}
         {hasSearched && !loading && !error && filteredPlayers.length === 0 && (
-          <div className="text-center py-12">
-            <div className="mx-auto h-24 w-24 text-gray-400 mb-4">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No players found</h3>
-            <p className="text-gray-600">
-              Try adjusting your search term or removing the position filter
-            </p>
-          </div>
-        )}
-
-        {/* Results Count */}
-        {filteredPlayers.length > 0 && (
-          <div className="mb-6">
-            <p className="text-gray-600">
-              Found {filteredPlayers.length} player{filteredPlayers.length !== 1 ? 's' : ''}
-              {positionFilter && ` (filtered by ${positionFilter})`}
-            </p>
-          </div>
-        )}
-
-        {/* Player Cards Grid */}
-        {filteredPlayers.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredPlayers.map((player) => {
-              const { teamName, position, appearances, goals, assists, teamLogo } = getPrimaryTeamAndPosition(player);
-
-              return (
-                <div
-                  key={player.id}
-                  className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-shadow duration-300 overflow-hidden"
-                >
-                  {/* Player Photo */}
-                  <div className="relative h-48 bg-gradient-to-br from-blue-400 to-purple-500">
-                    {player.photo ? (
-                      <img
-                        src={player.photo}
-                        alt={player.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-full">
-                        <div className="text-white text-6xl font-bold">
-                          {player.name.charAt(0)}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Team Logo Overlay */}
-                    {teamLogo && (
-                      <div className="absolute top-2 right-2 bg-white rounded-full p-1">
-                        <img
-                          src={teamLogo}
-                          alt={teamName}
-                          className="w-8 h-8 object-contain"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Player Info */}
-                  <div className="p-6">
-                    {/* Name */}
-                    <h3 className="text-xl font-bold text-gray-900 mb-2 truncate">
-                      {player.name}
-                    </h3>
-
-                    {/* Basic Info */}
-                    <div className="space-y-2 mb-4">
-                      <div className="flex items-center text-sm text-gray-600">
-                        <span className="font-medium w-20">Age:</span>
-                        <span>{player.age} years</span>
-                      </div>
-                      
-                      <div className="flex items-center text-sm text-gray-600">
-                        <span className="font-medium w-20">Nation:</span>
-                        <span>{player.nationality}</span>
-                      </div>
-
-                      <div className="flex items-center text-sm text-gray-600">
-                        <span className="font-medium w-20">Team:</span>
-                        <span className="truncate">{teamName}</span>
-                      </div>
-
-                      <div className="flex items-center text-sm text-gray-600">
-                        <span className="font-medium w-20">Position:</span>
-                        <span>{position}</span>
-                      </div>
-                    </div>
-
-                    {/* Statistics */}
-                    <div className="border-t pt-4">
-                      <h4 className="text-sm font-medium text-gray-700 mb-2">2023 Season Stats</h4>
-                      <div className="grid grid-cols-3 gap-2 text-center">
-                        <div className="bg-gray-50 rounded-lg p-2">
-                          <div className="text-lg font-bold text-blue-600">{appearances}</div>
-                          <div className="text-xs text-gray-500">Matches</div>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-2">
-                          <div className="text-lg font-bold text-green-600">{goals}</div>
-                          <div className="text-xs text-gray-500">Goals</div>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-2">
-                          <div className="text-lg font-bold text-purple-600">{assists}</div>
-                          <div className="text-xs text-gray-500">Assists</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Injury Status */}
-                    {player.injured && (
-                      <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-2">
-                        <span className="text-red-600 text-sm font-medium">⚠️ Currently Injured</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <p className="text-center text-gray-600 mt-12">No players found</p>
         )}
       </div>
     </div>
