@@ -1,235 +1,127 @@
-"use client";
+import React, { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-import React, { useState } from "react";
-import axios from "axios";
-
-// --- Types ---
-interface PlayerStatistics {
-  team: { id: number; name: string; logo: string };
-  league: { id: number; name: string; season: number };
-  games: { appearences: number; position: string };
-  goals: { total: number | null; assists: number | null };
-}
+// --- Supabase setup ---
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 interface Player {
   id: number;
   name: string;
   age: number;
   nationality: string;
-  photo: string;
-  injured: boolean;
-  statistics: PlayerStatistics[];
+  club: string;
+  league: string;
 }
-
-interface ApiResponse {
-  response: {
-    player: Player;
-    statistics: PlayerStatistics[];
-  }[];
-}
-
-// --- Filters ---
-const POSITION_OPTIONS = [
-  { value: "", label: "All Positions" },
-  { value: "Goalkeeper", label: "Goalkeeper" },
-  { value: "Defender", label: "Defender" },
-  { value: "Midfielder", label: "Midfielder" },
-  { value: "Attacker", label: "Forward" },
-];
 
 const Players: React.FC = () => {
   const [players, setPlayers] = useState<Player[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [positionFilter, setPositionFilter] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
 
-  // API config
-  const API_KEY = process.env.NEXT_PUBLIC_RAPIDAPI_KEY!;
-  const API_HOST = "api-football-v1.p.rapidapi.com";
-
-  // --- Fetch Players ---
-  const fetchPlayers = async (playerName: string) => {
-    if (!playerName.trim()) {
-      setError("Please enter a player name");
-      return;
-    }
-
+  // Fetch players from Supabase
+  const fetchPlayers = async (search: string) => {
     setLoading(true);
     setError(null);
     setHasSearched(true);
 
     try {
-      const { data } = await axios.get<ApiResponse>(
-        "https://api-football-v1.p.rapidapi.com/v3/players",
-        {
-          params: { search: playerName.trim(), season: "2023" },
-          headers: {
-            "X-RapidAPI-Key": API_KEY,
-            "X-RapidAPI-Host": API_HOST,
-          },
-        }
-      );
+      let query = supabase.from("players").select("*");
 
-      const transformed = data.response.map((item) => ({
-        ...item.player,
-        statistics: item.statistics,
-      }));
-
-      setPlayers(transformed);
-    } catch (err: any) {
-      console.error("Error fetching players:", err);
-      if (axios.isAxiosError(err)) {
-        if (err.response?.status === 429) setError("Rate limit exceeded, try later.");
-        else if (err.response?.status === 401) setError("Invalid API key.");
-        else setError(err.response?.data?.message || "Failed to fetch players");
-      } else {
-        setError("Unexpected error");
+      if (search.trim()) {
+        query = query.ilike("name", `%${search.trim()}%`);
       }
-      setPlayers([]);
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      setPlayers(data || []);
+    } catch (err: any) {
+      console.error("Error fetching players:", err.message);
+      setError("Failed to fetch players from Supabase");
     } finally {
       setLoading(false);
     }
   };
 
-  // --- Handlers ---
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     fetchPlayers(searchTerm);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") handleSearch(e as any);
-  };
-
-  // --- Helpers ---
-  const filteredPlayers = players.filter((p) =>
-    positionFilter
-      ? p.statistics.some((s) =>
-          s.games.position.toLowerCase().includes(positionFilter.toLowerCase())
-        )
-      : true
-  );
-
-  const getPrimaryStats = (player: Player) => {
-    if (!player.statistics.length) {
-      return { team: "Unknown", pos: "Unknown", apps: 0, goals: 0, assists: 0, logo: "" };
-    }
-
-    const best = player.statistics.reduce((prev, cur) =>
-      (prev.games.appearences || 0) > (cur.games.appearences || 0) ? prev : cur
-    );
-
-    return {
-      team: best.team.name,
-      pos: best.games.position,
-      apps: best.games.appearences || 0,
-      goals: best.goals.total || 0,
-      assists: best.goals.assists || 0,
-      logo: best.team.logo,
-    };
-  };
+  useEffect(() => {
+    fetchPlayers("");
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 py-8 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold">⚽ Football Player Search</h1>
-          <p className="text-gray-600">Search for professional football players</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 py-12 px-4">
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-12">
+          <div className="text-6xl mb-2">⚽</div>
+          <h1 className="text-4xl font-extrabold text-white mb-3 tracking-tight">
+            Player Database
+          </h1>
+          <p className="text-blue-200 text-lg">Search for players from your Supabase table</p>
         </div>
 
-        {/* Search */}
-        <form onSubmit={handleSearch} className="bg-white shadow-lg rounded-xl p-6 mb-8 flex flex-col md:flex-row gap-4">
+        {/* Search bar */}
+        <form
+          onSubmit={handleSearch}
+          className="bg-white/10 backdrop-blur border border-white/20 shadow-xl rounded-2xl p-6 mb-10 flex flex-col md:flex-row gap-4"
+        >
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyPress={handleKeyPress}
             placeholder="Enter player name (e.g., Messi)"
-            className="flex-1 px-4 py-2 border rounded-lg"
+            className="flex-1 px-5 py-3 bg-white/90 border-2 border-transparent focus:border-blue-400 rounded-xl text-gray-800 placeholder-gray-500 outline-none"
           />
-          <select
-            value={positionFilter}
-            onChange={(e) => setPositionFilter(e.target.value)}
-            className="px-4 py-2 border rounded-lg md:w-48"
-          >
-            {POSITION_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
           <button
             type="submit"
-            disabled={loading || !searchTerm.trim()}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+            disabled={loading}
+            className="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-xl hover:from-blue-600 hover:to-purple-700 transition-all"
           >
-            {loading ? "Loading..." : "Search"}
+            {loading ? "Searching..." : "Search"}
           </button>
         </form>
 
-        {/* Error */}
-        {error && <div className="text-red-600 text-center mb-4">{error}</div>}
-
-        {/* Results */}
-        {filteredPlayers.length > 0 && (
-          <p className="mb-6 text-gray-600">
-            Found {filteredPlayers.length} player{filteredPlayers.length > 1 && "s"}
-          </p>
+        {error && (
+          <div className="bg-red-500/20 text-red-100 border border-red-400/50 rounded-xl p-4 mb-8 text-center">
+            ⚠️ {error}
+          </div>
         )}
 
         {/* Player Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredPlayers.map((p) => {
-            const { team, pos, apps, goals, assists, logo } = getPrimaryStats(p);
-
-            return (
-              <div key={p.id} className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition">
-                {/* Banner */}
-                <div className="relative h-48 bg-gradient-to-r from-blue-400 to-purple-500">
-                  {p.photo && (
-                    <img src={p.photo} alt={p.name} className="w-full h-full object-cover" />
-                  )}
-                  {logo && (
-                    <img src={logo} alt={team} className="absolute top-2 right-2 w-10 h-10 rounded-full bg-white p-1" />
-                  )}
-                </div>
-
-                {/* Content */}
-                <div className="p-6">
-                  <h3 className="text-xl font-bold mb-2">{p.name}</h3>
-                  <p className="text-sm text-gray-600">Age: {p.age} | {p.nationality}</p>
-                  <p className="text-sm text-gray-600">Team: {team} | Position: {pos}</p>
-
-                  <div className="grid grid-cols-3 gap-2 mt-4 text-center">
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-bold">{apps}</div>
-                      <div className="text-xs">Matches</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-bold text-green-600">{goals}</div>
-                      <div className="text-xs">Goals</div>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-2">
-                      <div className="font-bold text-purple-600">{assists}</div>
-                      <div className="text-xs">Assists</div>
-                    </div>
-                  </div>
-
-                  {p.injured && (
-                    <p className="mt-3 text-red-600 font-medium">⚠️ Currently Injured</p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+          {players.map((p) => (
+            <div
+              key={p.id}
+              className="bg-white/95 backdrop-blur rounded-2xl shadow-xl border border-white/40 p-6 hover:scale-105 transition-all duration-300"
+            >
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">{p.name}</h3>
+              <p className="text-gray-700">
+                <span className="font-semibold">Age:</span> {p.age}
+              </p>
+              <p className="text-gray-700">
+                <span className="font-semibold">Nationality:</span> {p.nationality}
+              </p>
+              <p className="text-gray-700">
+                <span className="font-semibold">Club:</span> {p.club}
+              </p>
+              <p className="text-gray-700">
+                <span className="font-semibold">League:</span> {p.league}
+              </p>
+            </div>
+          ))}
         </div>
 
-        {/* No results */}
-        {hasSearched && !loading && !error && filteredPlayers.length === 0 && (
-          <p className="text-center text-gray-600 mt-12">No players found</p>
+        {hasSearched && !loading && players.length === 0 && (
+          <div className="text-center mt-16 text-blue-200 text-xl">
+            🔍 No players found. Try another name.
+          </div>
         )}
       </div>
     </div>

@@ -1,25 +1,11 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import Navigation from '@/components/Navigation';
-import { Target, Brain, TrendingUp, AlertCircle } from 'lucide-react';
-import { format } from 'date-fns';
+import { useState, useEffect } from "react";
+import axios from "axios";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Brain, TrendingUp, Target, Sparkles } from "lucide-react";
 
-type Match = {
-  id: string;
-  match_date: string;
-  home_team?: { name: string };
-  away_team?: { name: string };
-  league: string;
-  status: string;
-};
-
-type Prediction = {
-  id: string;
-  match_id: string;
+interface PredictionResult {
   predicted_home_score: number;
   predicted_away_score: number;
   home_win_probability: number;
@@ -27,292 +13,276 @@ type Prediction = {
   away_win_probability: number;
   key_factors: string[];
   ai_analysis: string;
-  created_at: string;
-  matches: Match;
-};
+}
 
 const Predictions = () => {
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
-  const [upcomingMatches, setUpcomingMatches] = useState<Match[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [generatingPrediction, setGeneratingPrediction] = useState<string | null>(null);
+  const [teams, setTeams] = useState<string[]>([]);
+  const [homeTeam, setHomeTeam] = useState("");
+  const [awayTeam, setAwayTeam] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchPredictions();
-    fetchUpcomingMatches();
-  }, []);
-
-  const fetchPredictions = async () => {
+  // Fetch available teams from FastAPI
+  const fetchTeams = async () => {
     try {
-      const { data, error } = await supabase
-        .from('match_predictions')
-        .select(`
-          *,
-          matches (
-            id,
-            match_date,
-            league,
-            status,
-            home_team:teams!matches_home_team_id_fkey (name),
-            away_team:teams!matches_away_team_id_fkey (name)
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setPredictions(data || []);
-    } catch (error) {
-      console.error('Error fetching predictions:', error);
+      const res = await axios.get("http://localhost:8000/teams");
+      setTeams(res.data.teams || []);
+    } catch (err) {
+      console.error("Error fetching teams:", err);
+      setError("Unable to load team list. Make sure backend is running.");
     }
   };
 
-  const fetchUpcomingMatches = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('matches')
-        .select(`
-          id,
-          match_date,
-          league,
-          status,
-          home_team:teams!matches_home_team_id_fkey (name),
-          away_team:teams!matches_away_team_id_fkey (name)
-        `)
-        .eq('status', 'scheduled')
-        .order('match_date', { ascending: true })
-        .limit(10);
+  useEffect(() => {
+    fetchTeams();
+  }, []);
 
-      if (error) throw error;
-      
-      // Filter out matches that already have predictions
-      const predictedMatchIds = new Set(predictions.map(p => p.match_id));
-      const unpredictedMatches = (data || []).filter(match => !predictedMatchIds.has(match.id));
-      
-      setUpcomingMatches(unpredictedMatches);
-    } catch (error) {
-      console.error('Error fetching upcoming matches:', error);
+  const handlePredict = async () => {
+    if (!homeTeam || !awayTeam) {
+      setError("Please select both teams.");
+      return;
+    }
+    if (homeTeam === awayTeam) {
+      setError("Home and Away teams must be different.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setPrediction(null);
+
+    try {
+      const response = await axios.post("http://localhost:8000/predict", {
+        home_team: homeTeam,
+        away_team: awayTeam,
+      });
+      setPrediction(response.data);
+    } catch (err: any) {
+      console.error("Prediction error:", err);
+      setError(
+        err.response?.data?.detail ||
+          "Failed to generate prediction. Please try again."
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const generatePrediction = async (match: Match) => {
-    setGeneratingPrediction(match.id);
-    
-    try {
-      // Mock AI prediction generation - in a real app, this would call an AI service
-      const mockPrediction = {
-        match_id: match.id,
-        predicted_home_score: Number((Math.random() * 3 + 0.5).toFixed(2)),
-        predicted_away_score: Number((Math.random() * 3 + 0.5).toFixed(2)),
-        home_win_probability: Number((Math.random() * 40 + 30).toFixed(2)),
-        draw_probability: Number((Math.random() * 30 + 20).toFixed(2)),
-        away_win_probability: Number((Math.random() * 40 + 30).toFixed(2)),
-        key_factors: [
-          'Home advantage',
-          'Recent form comparison',
-          'Head-to-head record',
-          'Player availability'
-        ],
-        ai_analysis: `Based on current form, recent performances, and historical data, this match presents an interesting tactical battle. The home team's recent attacking prowess will be tested against the away team's solid defensive structure. Key players' fitness and weather conditions may play decisive roles in the outcome.`
-      };
-
-      const { error } = await supabase
-        .from('match_predictions')
-        .insert(mockPrediction);
-
-      if (error) throw error;
-
-      // Refresh predictions and upcoming matches
-      await fetchPredictions();
-      await fetchUpcomingMatches();
-    } catch (error) {
-      console.error('Error generating prediction:', error);
-    } finally {
-      setGeneratingPrediction(null);
-    }
-  };
-
-  const getMostLikelyOutcome = (prediction: Prediction) => {
+  const getWinnerInfo = () => {
+    if (!prediction) return null;
     const { home_win_probability, draw_probability, away_win_probability } = prediction;
-    const max = Math.max(home_win_probability, draw_probability, away_win_probability);
     
-    if (max === home_win_probability) return 'Home Win';
-    if (max === away_win_probability) return 'Away Win';
-    return 'Draw';
+    if (home_win_probability > draw_probability && home_win_probability > away_win_probability) {
+      return { team: homeTeam, prob: home_win_probability, type: 'home' };
+    } else if (away_win_probability > draw_probability && away_win_probability > home_win_probability) {
+      return { team: awayTeam, prob: away_win_probability, type: 'away' };
+    }
+    return { team: 'Draw', prob: draw_probability, type: 'draw' };
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Navigation />
-        <div className="container mx-auto p-6 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading predictions...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const winner = getWinnerInfo();
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navigation />
-      
-      <div className="container mx-auto p-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Match Predictions</h1>
-          <p className="text-muted-foreground">AI-powered football match predictions and analysis</p>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-900 to-slate-900 py-12 px-4">
+      <div className="container mx-auto max-w-5xl">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full mb-4 shadow-2xl">
+            <Brain className="w-10 h-10 text-white" />
+          </div>
+          <h1 className="text-5xl font-extrabold text-white mb-3 tracking-tight">
+            AI Match Predictor
+          </h1>
+          <p className="text-purple-200 text-lg">Advanced machine learning powered predictions</p>
         </div>
 
-        {upcomingMatches.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-              <AlertCircle className="w-5 h-5" />
-              Generate New Predictions
-            </h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {upcomingMatches.slice(0, 6).map((match) => (
-                <Card key={match.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
-                    <div className="text-center space-y-3">
-                      <div className="flex items-center justify-between text-sm font-medium">
-                        <span>{match.home_team?.name || 'TBD'}</span>
-                        <span className="text-muted-foreground">vs</span>
-                        <span>{match.away_team?.name || 'TBD'}</span>
+        <div className="grid md:grid-cols-5 gap-6">
+          {/* Selection Panel */}
+          <Card className="md:col-span-2 bg-white/95 backdrop-blur border-0 shadow-2xl">
+            <CardHeader className="bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-t-xl">
+              <CardTitle className="text-2xl font-bold flex items-center gap-2">
+                <Target className="w-6 h-6" />
+                Select Teams
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent className="space-y-6 pt-6">
+              <div>
+                <label className="block mb-3 text-sm font-bold text-gray-700 uppercase tracking-wide">
+                  🏠 Home Team
+                </label>
+                <select
+                  value={homeTeam}
+                  onChange={(e) => setHomeTeam(e.target.value)}
+                  className="w-full border-2 border-gray-300 focus:border-blue-500 rounded-xl px-4 py-3 text-gray-800 font-medium transition outline-none bg-gradient-to-r from-blue-50 to-white"
+                >
+                  <option value="">-- Choose Home Team --</option>
+                  {teams.map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="text-center text-2xl font-bold text-gray-400">VS</div>
+
+              <div>
+                <label className="block mb-3 text-sm font-bold text-gray-700 uppercase tracking-wide">
+                  ✈️ Away Team
+                </label>
+                <select
+                  value={awayTeam}
+                  onChange={(e) => setAwayTeam(e.target.value)}
+                  className="w-full border-2 border-gray-300 focus:border-purple-500 rounded-xl px-4 py-3 text-gray-800 font-medium transition outline-none bg-gradient-to-r from-purple-50 to-white"
+                >
+                  <option value="">-- Choose Away Team --</option>
+                  {teams.map((team) => (
+                    <option key={team} value={team}>
+                      {team}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <Button
+                onClick={handlePredict}
+                disabled={loading || !homeTeam || !awayTeam}
+                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-500 font-bold text-lg shadow-lg hover:shadow-xl transition-all transform hover:scale-105 active:scale-95"
+              >
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    <span>Analyzing...</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center gap-2">
+                    <Sparkles className="w-5 h-5" />
+                    <span>Predict Match</span>
+                  </div>
+                )}
+              </Button>
+
+              {error && (
+                <div className="bg-red-50 border-2 border-red-300 text-red-700 px-4 py-3 rounded-xl text-center font-semibold">
+                  ⚠️ {error}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Results Panel */}
+          <div className="md:col-span-3 space-y-6">
+            {prediction ? (
+              <>
+                {/* Score Prediction */}
+                <Card className="bg-gradient-to-br from-white to-blue-50 border-0 shadow-2xl overflow-hidden">
+                  <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white">
+                    <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
+                      <TrendingUp className="w-6 h-6" />
+                      Predicted Score
+                    </h3>
+                    <div className="flex items-center justify-between">
+                      <div className="text-center flex-1">
+                        <div className="text-lg font-semibold mb-2 opacity-90">{homeTeam}</div>
+                        <div className="text-6xl font-black">{prediction.predicted_home_score.toFixed(1)}</div>
                       </div>
-                      
-                      <div className="text-xs text-muted-foreground">
-                        {format(new Date(match.match_date), 'MMM dd, yyyy HH:mm')}
+                      <div className="text-4xl font-bold px-6">-</div>
+                      <div className="text-center flex-1">
+                        <div className="text-lg font-semibold mb-2 opacity-90">{awayTeam}</div>
+                        <div className="text-6xl font-black">{prediction.predicted_away_score.toFixed(1)}</div>
                       </div>
-                      
-                      <Button 
-                        onClick={() => generatePrediction(match)}
-                        disabled={generatingPrediction === match.id}
-                        className="w-full"
-                        size="sm"
-                      >
-                        {generatingPrediction === match.id ? (
-                          <>
-                            <div className="animate-spin rounded-full h-3 w-3 border-b border-white mr-2"></div>
-                            Analyzing...
-                          </>
-                        ) : (
-                          <>
-                            <Brain className="w-3 h-3 mr-2" />
-                            Generate Prediction
-                          </>
-                        )}
-                      </Button>
+                    </div>
+                  </div>
+                  
+                  {winner && (
+                    <div className="p-4 bg-gradient-to-r from-yellow-400 to-orange-400 text-center">
+                      <div className="text-white font-bold text-lg">
+                        🏆 Predicted Winner: <span className="text-xl">{winner.team}</span> ({winner.prob.toFixed(1)}%)
+                      </div>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Win Probabilities */}
+                <Card className="bg-white/95 backdrop-blur border-0 shadow-2xl">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-gray-800">Match Outcome Probabilities</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <div className="flex justify-between text-sm font-semibold mb-2">
+                        <span className="text-blue-700">🏠 {homeTeam} Win</span>
+                        <span className="text-blue-700">{prediction.home_win_probability.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={prediction.home_win_probability} className="h-3 bg-blue-100" />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm font-semibold mb-2">
+                        <span className="text-gray-700">🤝 Draw</span>
+                        <span className="text-gray-700">{prediction.draw_probability.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={prediction.draw_probability} className="h-3 bg-gray-100" />
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm font-semibold mb-2">
+                        <span className="text-purple-700">✈️ {awayTeam} Win</span>
+                        <span className="text-purple-700">{prediction.away_win_probability.toFixed(1)}%</span>
+                      </div>
+                      <Progress value={prediction.away_win_probability} className="h-3 bg-purple-100" />
                     </div>
                   </CardContent>
                 </Card>
-              ))}
-            </div>
-          </div>
-        )}
 
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold mb-4 flex items-center gap-2">
-            <Target className="w-5 h-5" />
-            Latest Predictions
-          </h2>
-          
-          <div className="space-y-6">
-            {predictions.map((prediction) => (
-              <Card key={prediction.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <span className="text-lg">
-                        {prediction.matches.home_team?.name} vs {prediction.matches.away_team?.name}
-                      </span>
-                      <Badge variant="secondary">{prediction.matches.league}</Badge>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      <TrendingUp className="w-3 h-3 mr-1" />
-                      {getMostLikelyOutcome(prediction)}
-                    </Badge>
-                  </CardTitle>
-                </CardHeader>
-                
-                <CardContent className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <h4 className="font-semibold mb-3">Predicted Score</h4>
-                      <div className="text-center p-4 bg-muted rounded-lg">
-                        <div className="text-2xl font-bold">
-                          {prediction.predicted_home_score.toFixed(1)} - {prediction.predicted_away_score.toFixed(1)}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <h4 className="font-semibold mb-3">Win Probabilities</h4>
-                      <div className="space-y-3">
-                        <div>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span>Home Win</span>
-                            <span>{prediction.home_win_probability}%</span>
+                {/* Key Factors */}
+                <Card className="bg-white/95 backdrop-blur border-0 shadow-2xl">
+                  <CardHeader className="bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-t-xl">
+                    <CardTitle className="text-xl font-bold">🎯 Key Factors</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-6">
+                    <div className="grid gap-3">
+                      {prediction.key_factors.map((factor, i) => (
+                        <div key={i} className="flex items-start gap-3 bg-gradient-to-r from-green-50 to-teal-50 p-4 rounded-lg border border-green-200">
+                          <div className="flex-shrink-0 w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">
+                            {i + 1}
                           </div>
-                          <Progress value={prediction.home_win_probability} className="h-2" />
+                          <p className="text-gray-800 font-medium">{factor}</p>
                         </div>
-                        
-                        <div>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span>Draw</span>
-                            <span>{prediction.draw_probability}%</span>
-                          </div>
-                          <Progress value={prediction.draw_probability} className="h-2" />
-                        </div>
-                        
-                        <div>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span>Away Win</span>
-                            <span>{prediction.away_win_probability}%</span>
-                          </div>
-                          <Progress value={prediction.away_win_probability} className="h-2" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold mb-3">Key Factors</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {prediction.key_factors?.map((factor, index) => (
-                        <Badge key={index} variant="outline">
-                          {factor}
-                        </Badge>
                       ))}
                     </div>
-                  </div>
-                  
-                  <div>
-                    <h4 className="font-semibold mb-3">AI Analysis</h4>
-                    <p className="text-muted-foreground leading-relaxed">
-                      {prediction.ai_analysis}
-                    </p>
-                  </div>
-                  
-                  <div className="text-xs text-muted-foreground border-t pt-3">
-                    Prediction generated on {format(new Date(prediction.created_at), 'MMM dd, yyyy HH:mm')}
+                  </CardContent>
+                </Card>
+
+                {/* AI Analysis */}
+                <Card className="bg-gradient-to-br from-purple-900 to-indigo-900 border-0 shadow-2xl">
+                  <CardHeader>
+                    <CardTitle className="text-xl font-bold text-white flex items-center gap-2">
+                      <Brain className="w-6 h-6" />
+                      AI Deep Analysis
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-white/10 backdrop-blur p-5 rounded-xl border border-white/20">
+                      <p className="text-white leading-relaxed text-base">
+                        {prediction.ai_analysis}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <Card className="bg-white/10 backdrop-blur border border-white/20 shadow-2xl h-96 flex items-center justify-center">
+                <CardContent>
+                  <div className="text-center text-white/60">
+                    <Brain className="w-20 h-20 mx-auto mb-4 opacity-50" />
+                    <p className="text-xl font-semibold">Select teams and click predict to see results</p>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            )}
           </div>
         </div>
-
-        {predictions.length === 0 && upcomingMatches.length === 0 && (
-          <div className="text-center py-12">
-            <Target className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground text-lg">No predictions available yet.</p>
-            <p className="text-sm text-muted-foreground">Add some matches to generate predictions.</p>
-          </div>
-        )}
       </div>
     </div>
   );
