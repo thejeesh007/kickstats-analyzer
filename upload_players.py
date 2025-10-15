@@ -2,7 +2,7 @@ import pandas as pd
 from supabase import create_client, Client
 
 # ========= CONFIG =========
-EXCEL_FILE = "players_transfermarkt.xlsx"
+EXCEL_FILE = "bundesliga_players.xlsx"
 SUPABASE_URL = "https://hxgsraidjabucolzddec.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4Z3NyYWlkamFidWNvbHpkZGVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjY3NDA1OCwiZXhwIjoyMDcyMjUwMDU4fQ.NMUxUKxj1DCVaNS2rFUHGmMfIxUMXrm3m9vp6NJDboQ"
 TABLE_NAME = "players"
