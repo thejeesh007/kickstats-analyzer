@@ -188,16 +188,17 @@ def get_teams_by_league(league_id: int, season: int = 2024):
     print("🟩 TEAMS RESPONSE:", data)
     return data
 
-@app.get("/players/{team_id}")
-def get_players_by_team(team_id: int, season: int = 2024):
-    """Fetch all players for a given team."""
+@app.get("/players")
+def get_players(team: int, season: int = 2024):
+    """
+    Fetch players for a given team and season.
+    """
     headers = {"x-apisports-key": API_KEY}
-    url = f"{BASE_URL}/players?team={team_id}&season={season}"
-    print("🟩 PLAYERS API URL:", url)
+    url = f"{BASE_URL}/players?team={team}&season={season}"
+    print(f"🔍 Fetching players from: {url}")
     res = requests.get(url, headers=headers)
-    data = res.json()
-    print("🟩 PLAYERS RESPONSE:", data)
-    return data
+    return res.json()
+
 
 # ============================
 #  RUN LOCALLY
