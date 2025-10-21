@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import joblib
 import numpy as np
 import os
@@ -20,7 +20,7 @@ if not API_KEY:
 # ============================
 #  FASTAPI APP SETUP
 # ============================
-app = FastAPI(title="Football Prediction API")
+app = FastAPI(title="Football Prediction & Data API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -50,6 +50,7 @@ class PredictionResponse(BaseModel):
     key_factors: List[str]
     ai_analysis: str
 
+
 def load_models():
     models_dir = "football_models"
     if not os.path.exists(models_dir):
@@ -66,6 +67,7 @@ def load_models():
         print(f"❌ Error loading models: {e}")
         return False
 
+
 def create_feature_vector(home_encoded, away_encoded):
     features = [
         home_encoded, away_encoded, 1.5, 1.3, 1.7, 1.1, 1.3, 1.5,
@@ -73,14 +75,17 @@ def create_feature_vector(home_encoded, away_encoded):
     ]
     return np.array([features])
 
+
 @app.on_event("startup")
 async def startup_event():
     if not load_models():
         print("⚠️ Warning: Models failed to load. Predictions may not work.")
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "models_loaded": len(models) > 0}
+
 
 # ============================
 #  ML PREDICTION ENDPOINTS
@@ -91,6 +96,7 @@ async def get_teams():
         raise HTTPException(status_code=500, detail="Models not loaded")
     teams = list(models['home_encoder'].classes_)
     return {"teams": sorted(teams)}
+
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_match(request: PredictionRequest):
@@ -154,6 +160,7 @@ async def predict_match(request: PredictionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
+
 # ============================
 #  FOOTBALL DATA ENDPOINTS
 # ============================
@@ -166,6 +173,7 @@ def get_countries():
     res = requests.get(f"{BASE_URL}/countries", headers=headers)
     return res.json()
 
+
 @app.get("/leagues")
 def get_leagues(country: str):
     """Fetch all leagues for a given country."""
@@ -176,6 +184,7 @@ def get_leagues(country: str):
     data = res.json()
     print("🟩 LEAGUES RESPONSE:", data)
     return data
+
 
 @app.get("/teams/{league_id}")
 def get_teams_by_league(league_id: int, season: int = 2024):
@@ -188,16 +197,67 @@ def get_teams_by_league(league_id: int, season: int = 2024):
     print("🟩 TEAMS RESPONSE:", data)
     return data
 
+
 @app.get("/players")
 def get_players(team: int, season: int = 2024):
-    """
-    Fetch players for a given team and season.
-    """
+    """Fetch players for a given team and season."""
     headers = {"x-apisports-key": API_KEY}
     url = f"{BASE_URL}/players?team={team}&season={season}"
     print(f"🔍 Fetching players from: {url}")
     res = requests.get(url, headers=headers)
     return res.json()
+
+
+# ============================
+#  FIXTURES ENDPOINT (NEW)
+# ============================
+@app.get("/fixtures")
+def get_fixtures(
+    league: int = Query(..., description="League ID"),
+    season: int = Query(..., description="Season year"),
+    team: Optional[int] = Query(None, description="Optional team ID"),
+    status: Optional[str] = Query(None, description="Match status: live, finished, etc."),
+):
+    """Fetch fixtures (matches) for a given league and season."""
+    headers = {"x-apisports-key": API_KEY}
+    params = {"league": league, "season": season}
+
+    if team:
+        params["team"] = team
+    if status:
+        params["status"] = status
+
+    print(f"⚽ Fetching fixtures with params: {params}")
+    res = requests.get(f"{BASE_URL}/fixtures", headers=headers, params=params)
+
+    if res.status_code != 200:
+        raise HTTPException(status_code=res.status_code, detail="Failed to fetch fixtures")
+
+    data = res.json()
+    simplified = []
+
+    for item in data.get("response", []):
+        fixture = item["fixture"]
+        teams = item["teams"]
+        goals = item["goals"]
+        league_info = item["league"]
+
+        simplified.append({
+            "fixture_id": fixture["id"],
+            "date": fixture["date"],
+            "status": fixture["status"]["short"],
+            "home_team": teams["home"]["name"],
+            "away_team": teams["away"]["name"],
+            "home_logo": teams["home"]["logo"],
+            "away_logo": teams["away"]["logo"],
+            "home_goals": goals["home"],
+            "away_goals": goals["away"],
+            "venue": fixture["venue"]["name"] if fixture.get("venue") else None,
+            "league": league_info["name"],
+            "season": league_info["season"]
+        })
+
+    return {"fixtures": simplified, "count": len(simplified)}
 
 
 # ============================
