@@ -1,73 +1,79 @@
-# Welcome to your Lovable project
+How to Use the Application
+🧭 Step 1: Explore Teams
 
-## Project info
+Navigate to the Teams page.
 
-**URL**: https://lovable.dev/projects/aa5ff8bc-f751-42e8-9a83-72bac74102b5
+Select a Country from the dropdown list.
 
-## How can I edit this code?
+Choose a League to view all participating teams.
 
-There are several ways of editing your application.
+Click on a Team Card to view detailed information such as players and stats.
 
-**Use Lovable**
+⚽ Step 2: Check Fixtures (Matches)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/aa5ff8bc-f751-42e8-9a83-72bac74102b5) and start prompting.
+Go to the Matches section.
 
-Changes made via Lovable will be committed automatically to this repo.
+Choose a Country, then select a League.
 
-**Use your preferred IDE**
+The system will automatically display upcoming and live matches.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Each fixture card shows:
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+Home & Away teams
 
-Follow these steps:
+Match date and time
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+Current score or status
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+🧍 Step 3: Search Players
 
-# Step 3: Install the necessary dependencies.
-npm i
+Open the Players tab.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+Enter a player’s name (e.g., Messi, Ronaldo) in the search bar.
 
-**Edit a file directly in GitHub**
+The app fetches real-time player data (age, nationality, team, and stats) via the Football API.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+📊 Step 4: Predict Match Outcomes
 
-**Use GitHub Codespaces**
+Go to the Prediction module.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Select the Home and Away teams from the list.
 
-## What technologies are used for this project?
+Click Predict.
 
-This project is built with:
+The AI model provides:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Predicted result (Win/Draw/Loss)
 
-## How can I deploy this project?
+Expected score
 
-Simply open [Lovable](https://lovable.dev/projects/aa5ff8bc-f751-42e8-9a83-72bac74102b5) and click on Share -> Publish.
+Win probabilities and AI analysis summary
 
-## Can I connect a custom domain to my Lovable project?
+4. Error Handling
 
-Yes, you can!
+If the API key is missing or invalid, the app shows an alert:
+“API Key not configured. Please check your .env file.”
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+If no data is found for a league or player, a friendly message appears:
+“No records found. Try a different search or league.”
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+5. Logout / Exit
+
+To stop the backend:
+
+CTRL + C
+
+
+To stop the frontend:
+
+CTRL + C
+
+6. Summary
+
+The KickStats Analyzer web application provides a unified platform to:
+
+Explore football teams, players, and leagues across multiple countries
+
+Predict match outcomes using machine learning
+
+Display real-time football fixtures with dynamic visuals
