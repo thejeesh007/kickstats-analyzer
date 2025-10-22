@@ -96,8 +96,6 @@ async def get_teams():
         raise HTTPException(status_code=500, detail="Models not loaded")
     teams = list(models['home_encoder'].classes_)
     return {"teams": sorted(teams)}
-
-
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_match(request: PredictionRequest):
     if not models:
