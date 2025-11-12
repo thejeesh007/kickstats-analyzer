@@ -68,7 +68,7 @@ class PredictionResponse(BaseModel):
 
 
 def load_models():
-    models_dir = "football_models"
+    models_dir = "/backend/football_models/"
     if not os.path.exists(models_dir):
         raise FileNotFoundError("Models directory not found. Please train models first.")
 
